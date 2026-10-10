@@ -39,21 +39,18 @@ const getPeriodListForDate = (date) => {
   return base;
 };
 
-// 表示名の変換
 const formatPeriod = (p) => p === 'lunch' ? '昼休み' : `${p}限`;
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('mySchedule');
   
-  // Auth state
   const [isLogin, setIsLogin] = useState(true);
   const [authForm, setAuthForm] = useState({ username: '', password: '', confirmPassword: '', displayName: '', year: '2026年度', parts: [] });
   const [authError, setAuthError] = useState('');
 
   const [activeGroup, setActiveGroup] = useState(null);
 
-  // --- Auth Functions ---
   const handleAuth = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -274,28 +271,29 @@ function MyScheduleView({ user }) {
       
       if (activeRule) {
         const currentStatus = activeRule.status || 'x';
+        const safeStartDate = activeRule.startDate || '2000-01-01'; // 古いデータ保護用
         
         if (currentStatus === newStatus || (!activeRule.status && newStatus === 'x')) {
             // ----- 解除操作 -----
-            if (type === 'once' || !activeRule.startDate || activeRule.startDate === dStr) {
+            if (type === 'once' || safeStartDate === dStr) {
                 // once または 今日設定したばかりなら完全削除
                 await deleteDoc(doc(db, "schedules", activeRule.id));
                 newSchedules = newSchedules.filter(r => r.id !== activeRule.id);
             } else {
-                // 過去に設定したものは endDate を設定して無効化（過去は残る）
+                // 過去に設定したものは endDate を設定して過去の記録を残す
                 await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
                 const idx = newSchedules.findIndex(r => r.id === activeRule.id);
                 if(idx >= 0) newSchedules[idx].endDate = dStr;
             }
         } else {
             // ----- 変更（上書き）操作 -----
-            if (type === 'once' || !activeRule.startDate || activeRule.startDate === dStr) {
+            if (type === 'once' || safeStartDate === dStr) {
                 // once または 今日設定したばかりならステータスを直接上書き
                 await updateDoc(doc(db, "schedules", activeRule.id), { status: newStatus });
                 const idx = newSchedules.findIndex(r => r.id === activeRule.id);
                 if(idx >= 0) newSchedules[idx].status = newStatus;
             } else {
-                // 過去の設定なら古いものを終了させ、新しい設定を追加（過去は残る）
+                // 過去の別ステータス設定なら古いものを終了させ、新しい設定を今日から追加（過去を残す）
                 await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
                 const idx = newSchedules.findIndex(r => r.id === activeRule.id);
                 if(idx >= 0) newSchedules[idx].endDate = dStr;
@@ -360,7 +358,8 @@ function MyScheduleView({ user }) {
         if (isAllSet) {
           // ----- 全て解除 -----
           if (activeRule) {
-             if (type === 'once' || !activeRule.startDate || activeRule.startDate === dStr) {
+             const safeStartDate = activeRule.startDate || '2000-01-01';
+             if (type === 'once' || safeStartDate === dStr) {
                 await deleteDoc(doc(db, "schedules", activeRule.id));
                 updatedSchedules = updatedSchedules.filter(r => r.id !== activeRule.id);
              } else {
@@ -373,8 +372,9 @@ function MyScheduleView({ user }) {
           // ----- 全て設定 (変更・上書き・新規) -----
           if (activeRule) {
              const currentStatus = activeRule.status || 'x';
+             const safeStartDate = activeRule.startDate || '2000-01-01';
              if (currentStatus !== inputStatus) {
-                 if (type === 'once' || !activeRule.startDate || activeRule.startDate === dStr) {
+                 if (type === 'once' || safeStartDate === dStr) {
                      await updateDoc(doc(db, "schedules", activeRule.id), { status: inputStatus });
                      const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
                      if(idx >= 0) updatedSchedules[idx].status = inputStatus;
@@ -422,7 +422,7 @@ function MyScheduleView({ user }) {
         const rule = getScheduleRule(d, p);
         if (rule) {
           if (rule.status === 'ok') {
-            // ok(臨時行ける) の場合は表示上のマークは付けない
+            // ok
           } else if (rule.status === 'triangle') {
             hasTriangle = true;
           } else {
@@ -477,7 +477,7 @@ function MyScheduleView({ user }) {
         </div>
         <p className="text-[10px] text-gray-500 mb-4 bg-gray-50 p-2 rounded-lg leading-relaxed">
           上のボタンでモードを選択後、下の枠をタップしてください。<br/>
-          <span className="text-blue-600 font-bold">「〇 臨時OK」</span>は、<span className="font-bold underline">「この日」のみ選択可能</span>です。繰り返しの予定を特定の週だけ上書きする時に使います。
+          <span className="text-blue-600 font-bold">「〇 臨時OK」</span>は、<span className="font-bold underline">「この日」のみ選択可能</span>です。
         </p>
 
         <div className="mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
@@ -603,7 +603,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   
   const [groupMembers, setGroupMembers] = useState([]);
   const [allSchedules, setAllSchedules] = useState([]);
-  const [groupViewTab, setGroupViewTab] = useState('calendar'); // 'calendar' | 'list' | 'members'
+  const [groupViewTab, setGroupViewTab] = useState('calendar');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
 
@@ -711,8 +711,13 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       groupMembers.forEach(m => {
         const rule = getUserScheduleRule(m.id, date, p);
         if (rule) {
-          if (rule.status === 'triangle') triangleMembers.push(m);
-          else if (rule.status !== 'ok') xMembers.push(m);
+          if (rule.status === 'ok') {
+            // ok
+          } else if (rule.status === 'triangle') {
+            triangleMembers.push(m);
+          } else {
+            xMembers.push(m);
+          }
         }
       });
       detail.push({ period: p, xMembers, triangleMembers });
@@ -837,7 +842,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             const rule = getUserScheduleRule(m.id, d, p);
             if (rule) {
               if (rule.status === 'triangle') triangleMembers.push(m);
-              else if (rule.status !== 'ok') xMembers.push(m); // 'x' もしくは設定あり
+              else if (rule.status !== 'ok') xMembers.push(m);
             }
           });
 
@@ -848,10 +853,10 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           if (xCount === totalMembers) continue; 
 
           let category = 0;
-          if (xCount === 0 && triCount === 0) category = 1;      // ①全員〇
-          else if (xCount === 0 && triCount > 0) category = 2;   // ②全員OKだが△あり
-          else if (xCount > 0 && triCount === 0) category = 3;   // ③一部NG、残りは全員〇
-          else if (xCount > 0 && triCount > 0) category = 4;     // ④一部NG、残りに△あり
+          if (xCount === 0 && triCount === 0) category = 1;
+          else if (xCount === 0 && triCount > 0) category = 2;
+          else if (xCount > 0 && triCount === 0) category = 3;
+          else if (xCount > 0 && triCount > 0) category = 4;
 
           dayPeriods.push({ period: p, category, xMembers, triangleMembers });
         }
