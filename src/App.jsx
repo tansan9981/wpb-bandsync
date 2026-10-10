@@ -40,6 +40,14 @@ const getPeriodListForDate = (date) => {
 
 const formatPeriod = (p) => p === 'lunch' ? '昼休み' : `${p}限`;
 
+// 【重要修正】日本時間(JST)で正確な日付文字列(YYYY-MM-DD)を取得する関数
+const getLocalYMD = (date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('mySchedule');
@@ -196,6 +204,8 @@ function MyScheduleView({ user }) {
   const [mySchedules, setMySchedules] = useState([]);
   
   const [inputStatus, setInputStatus] = useState('x'); 
+  // 【追加】連打や処理被りを防ぐロック状態
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     if (!db) return;
@@ -209,7 +219,7 @@ function MyScheduleView({ user }) {
 
   const getScheduleRule = (date, period) => {
     const rules = mySchedules.filter(r => r.period === period);
-    const dStr = date.toISOString().split('T')[0];
+    const dStr = getLocalYMD(date);
     
     const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
     if (onceRule) return { ...onceRule, status: onceRule.status || 'x', isOverride: true };
@@ -244,7 +254,10 @@ function MyScheduleView({ user }) {
   };
 
   const toggleSchedule = async (date, period, type, newStatus) => {
-    const dStr = date.toISOString().split('T')[0];
+    if (isProcessing) return; // 処理中はブロック
+    setIsProcessing(true);
+    
+    const dStr = getLocalYMD(date);
     const rulesOfSameType = mySchedules.filter(r => r.period === period && r.type === type);
     
     let activeRule = null;
@@ -273,23 +286,25 @@ function MyScheduleView({ user }) {
         const safeStartDate = activeRule.startDate || '2000-01-01';
         
         if (currentStatus === newStatus || (!activeRule.status && newStatus === 'x')) {
+            // 解除
             if (type === 'once' || safeStartDate === dStr) {
                 await deleteDoc(doc(db, "schedules", activeRule.id));
                 newSchedules = newSchedules.filter(r => r.id !== activeRule.id);
             } else {
                 await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
                 const idx = newSchedules.findIndex(r => r.id === activeRule.id);
-                if(idx >= 0) newSchedules[idx].endDate = dStr;
+                if(idx >= 0) newSchedules[idx] = { ...newSchedules[idx], endDate: dStr };
             }
         } else {
+            // 変更（上書き）
             if (type === 'once' || safeStartDate === dStr) {
                 await updateDoc(doc(db, "schedules", activeRule.id), { status: newStatus });
                 const idx = newSchedules.findIndex(r => r.id === activeRule.id);
-                if(idx >= 0) newSchedules[idx].status = newStatus;
+                if(idx >= 0) newSchedules[idx] = { ...newSchedules[idx], status: newStatus };
             } else {
                 await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
                 const idx = newSchedules.findIndex(r => r.id === activeRule.id);
-                if(idx >= 0) newSchedules[idx].endDate = dStr;
+                if(idx >= 0) newSchedules[idx] = { ...newSchedules[idx], endDate: dStr };
                 
                 let newRule = { userId: user.id, period, type, status: newStatus, startDate: dStr };
                 if (type === 'weekly') newRule.dayOfWeek = date.getDay();
@@ -300,6 +315,7 @@ function MyScheduleView({ user }) {
             }
         }
       } else {
+        // 新規作成
         let newRule = { userId: user.id, period, type, status: newStatus, startDate: dStr };
         if (type === 'once') newRule.date = dStr;
         if (type === 'weekly') newRule.dayOfWeek = date.getDay();
@@ -309,13 +325,22 @@ function MyScheduleView({ user }) {
         newSchedules.push({ id: docRef.id, ...newRule });
       }
       setMySchedules(newSchedules);
-    } catch(e) { alert("更新エラー: Firebaseの設定を確認してください"); }
+    } catch(e) { 
+      alert("更新エラー: " + e.message); 
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleSetAllDay = async (type) => {
+    if (isProcessing) return; // 処理中はブロック
+    setIsProcessing(true);
+
     const periods = getPeriodListForDate(selectedDate);
-    const dStr = selectedDate.toISOString().split('T')[0];
+    const dStr = getLocalYMD(selectedDate);
     let updatedSchedules = [...mySchedules];
+    let hasError = false;
+    let errorMessage = "";
     
     const getActiveRuleForType = (period, targetType) => {
         const rulesOfSameType = updatedSchedules.filter(r => r.period === period && r.type === targetType);
@@ -343,11 +368,12 @@ function MyScheduleView({ user }) {
       return rule && (rule.status === inputStatus || (!rule.status && inputStatus === 'x'));
     });
     
-    try {
-      for (const period of periods) {
+    for (const period of periods) {
+      try {
         const activeRule = getActiveRuleForType(period, type);
 
         if (isAllSet) {
+          // 全て解除
           if (activeRule) {
              const safeStartDate = activeRule.startDate || '2000-01-01';
              if (type === 'once' || safeStartDate === dStr) {
@@ -356,10 +382,11 @@ function MyScheduleView({ user }) {
              } else {
                 await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
                 const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
-                if(idx >= 0) updatedSchedules[idx].endDate = dStr;
+                if(idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], endDate: dStr };
              }
           }
         } else {
+          // 全て設定 (変更・上書き・新規)
           if (activeRule) {
              const currentStatus = activeRule.status || 'x';
              const safeStartDate = activeRule.startDate || '2000-01-01';
@@ -367,11 +394,11 @@ function MyScheduleView({ user }) {
                  if (type === 'once' || safeStartDate === dStr) {
                      await updateDoc(doc(db, "schedules", activeRule.id), { status: inputStatus });
                      const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
-                     if(idx >= 0) updatedSchedules[idx].status = inputStatus;
+                     if(idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], status: inputStatus };
                  } else {
                      await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
                      const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
-                     if(idx >= 0) updatedSchedules[idx].endDate = dStr;
+                     if(idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], endDate: dStr };
                      
                      let newRule = { userId: user.id, period, type, status: inputStatus, startDate: dStr };
                      if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
@@ -391,9 +418,15 @@ function MyScheduleView({ user }) {
              updatedSchedules.push({ id: docRef.id, ...newRule });
           }
         }
+      } catch (err) {
+        hasError = true;
+        errorMessage = err.message;
       }
-      setMySchedules(updatedSchedules);
-    } catch (e) { alert("一括更新に失敗しました"); }
+    }
+    
+    setMySchedules(updatedSchedules);
+    setIsProcessing(false);
+    if (hasError) alert("一括更新の一部でエラーが発生しました: " + errorMessage);
   };
 
   const renderCalendar = () => {
@@ -408,7 +441,7 @@ function MyScheduleView({ user }) {
       
       let hasX = false;
       let hasTriangle = false;
-      let hasOk = false; // 追加：カレンダーに〇を表示するための判定
+      let hasOk = false;
       
       periods.forEach(p => {
         const rule = getScheduleRule(d, p);
@@ -419,7 +452,6 @@ function MyScheduleView({ user }) {
         }
       });
       
-      // 〇が含まれる日の背景色を少し青っぽくする
       let bgColor = 'bg-white border-gray-200';
       if (hasX) bgColor = 'bg-white border-gray-200';
       else if (hasTriangle) bgColor = 'bg-amber-50 border-amber-100';
@@ -430,7 +462,6 @@ function MyScheduleView({ user }) {
         <div key={i} onClick={() => setSelectedDate(d)} className="p-1 cursor-pointer">
           <div className={`h-12 rounded-xl flex flex-col items-center justify-center border ${bgColor} ${selectedDate?.toDateString() === d.toDateString() ? 'ring-2 ring-indigo-500' : ''}`}>
             <span className={`text-sm font-medium ${d.getDay()===0 ? 'text-red-500' : d.getDay()===6 ? 'text-blue-500' : 'text-gray-700'}`}>{i}</span>
-            {/* カレンダーに直接 ×、△、〇 の文字を表示する */}
             <div className="flex gap-0.5 mt-0.5 text-[12px] leading-none font-bold">
               {hasX && <span className="text-red-500">×</span>}
               {!hasX && hasTriangle && <span className="text-amber-500">△</span>}
@@ -458,10 +489,11 @@ function MyScheduleView({ user }) {
   const renderDayDetail = () => {
     if (!selectedDate) return null;
     const periods = getPeriodListForDate(selectedDate);
-    const dStr = selectedDate.toISOString().split('T')[0];
+    const dStr = getLocalYMD(selectedDate);
 
     return (
-      <div className="p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-4 animate-in slide-in-from-bottom-4">
+      // 処理中は半透明にしてクリック不可にする
+      <div className={`p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-4 animate-in slide-in-from-bottom-4 transition-opacity ${isProcessing ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-bold text-gray-800">{selectedDate.getMonth() + 1}/{selectedDate.getDate()} の予定</h3>
           <button onClick={() => setSelectedDate(null)} className="p-1 bg-gray-100 rounded-full hover:bg-gray-200"><X size={16}/></button>
@@ -661,7 +693,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
   const getUserScheduleRule = (userId, date, period) => {
     const rules = allSchedules.filter(r => r.userId === userId && r.period === period);
-    const dStr = date.toISOString().split('T')[0];
+    const dStr = getLocalYMD(date);
     
     const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
     if (onceRule) return { ...onceRule, status: onceRule.status || 'x' };
@@ -705,18 +737,14 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     for (let p of periods) {
       const xMembers = [];
       const triangleMembers = [];
-      const okMembers = []; // 追加: 臨時OKを可視化するため
+      const okMembers = [];
       
       groupMembers.forEach(m => {
         const rule = getUserScheduleRule(m.id, date, p);
         if (rule) {
-          if (rule.status === 'ok') {
-            okMembers.push(m);
-          } else if (rule.status === 'triangle') {
-            triangleMembers.push(m);
-          } else {
-            xMembers.push(m);
-          }
+          if (rule.status === 'ok') okMembers.push(m);
+          else if (rule.status === 'triangle') triangleMembers.push(m);
+          else xMembers.push(m);
         }
       });
       detail.push({ period: p, xMembers, triangleMembers, okMembers });
@@ -808,7 +836,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                     {isAllOK ? (
                       <div>
                         <span className="text-sm font-bold text-emerald-600 flex items-center gap-1"><Check size={16} /> 全員空いています！</span>
-                        {/* 臨時OKの人を特別に表示 */}
                         {p.okMembers.length > 0 && (
                           <div className="text-[10px] text-blue-600 mt-1">
                             <span className="font-bold">〇 臨時({p.okMembers.length}人):</span> {p.okMembers.map(m => m.displayName).join(', ')}
@@ -819,7 +846,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                       <div className="text-xs text-gray-600 space-y-1">
                         {p.xMembers.length > 0 && <div><span className="font-medium text-red-500">× ({p.xMembers.length}人)</span>: {p.xMembers.map(m => m.displayName).join(', ')}</div>}
                         {p.triangleMembers.length > 0 && <div><span className="font-medium text-amber-600">△ ({p.triangleMembers.length}人)</span>: {p.triangleMembers.map(m => m.displayName).join(', ')}</div>}
-                        {/* 臨時OKの人を特別に表示 */}
                         {p.okMembers.length > 0 && <div><span className="font-medium text-blue-600">〇 臨時({p.okMembers.length}人)</span>: {p.okMembers.map(m => m.displayName).join(', ')}</div>}
                       </div>
                     )}
@@ -847,7 +873,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         for (let p of periods) {
           const xMembers = [];
           const triangleMembers = [];
-          const okMembers = []; // 追加
+          const okMembers = [];
           
           groupMembers.forEach(m => {
             const rule = getUserScheduleRule(m.id, d, p);
@@ -861,14 +887,13 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           const xCount = xMembers.length;
           const triCount = triangleMembers.length;
 
-          // 全員NGの枠は非表示
           if (xCount === totalMembers) continue; 
 
           let category = 0;
-          if (xCount === 0 && triCount === 0) category = 1;      // ①全員〇
-          else if (xCount === 0 && triCount > 0) category = 2;   // ②全員OKだが△あり
-          else if (xCount > 0 && triCount === 0) category = 3;   // ③一部NG、残りは全員〇
-          else if (xCount > 0 && triCount > 0) category = 4;     // ④一部NG、残りに△あり
+          if (xCount === 0 && triCount === 0) category = 1;
+          else if (xCount === 0 && triCount > 0) category = 2;
+          else if (xCount > 0 && triCount === 0) category = 3;
+          else if (xCount > 0 && triCount > 0) category = 4;
 
           dayPeriods.push({ period: p, category, xMembers, triangleMembers, okMembers });
         }
@@ -913,7 +938,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                         <span className="font-bold text-gray-800 w-12 text-center text-sm">{formatPeriod(dp.period)}</span>
                         {badge}
                       </div>
-                      {/* x, triangle, ok のいずれかが存在する場合は詳細表示 */}
                       {(dp.xMembers.length > 0 || dp.triangleMembers.length > 0 || dp.okMembers.length > 0) && (
                         <div className="text-[11px] ml-14 space-y-0.5 mt-1">
                           {dp.xMembers.length > 0 && (
