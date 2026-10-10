@@ -373,7 +373,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   useEffect(() => {
     if (activeGroup && db) {
       const fetchDetails = async () => {
-        // 全ユーザーを取得してフィルタ (実運用では工夫が必要ですが今回はシンプルに)
         const snapM = await getDocs(collection(db, "users"));
         const allU = snapM.docs.map(d => ({ id: d.id, ...d.data() }));
         setGroupMembers(allU.filter(u => activeGroup.members.includes(u.id)));
@@ -441,16 +440,124 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     return { isAvailable: isAnyPeriodAllOK, detail };
   };
 
+  const generateAvailableList = () => {
+    const list = [];
+    const today = new Date();
+    // 60日先までチェック
+    for(let i=0; i<60; i++) {
+        const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+        const status = getDayStatus(d);
+        if(status.isAvailable) {
+            const okPeriods = status.detail.filter(p => p.ngMembers.length === 0).map(p => p.period);
+            list.push({ date: d, okPeriods });
+        }
+    }
+    return list;
+  };
+
   if (activeGroup) {
+    const renderGroupCalendar = () => {
+      const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
+      const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getDay();
+      const days = [];
+      
+      const headers = ['日', '月', '火', '水', '木', '金', '土'].map((day, idx) => (
+        <div key={`h-${idx}`} className={`text-center text-xs font-medium py-2 ${idx === 0 ? 'text-red-500' : idx === 6 ? 'text-blue-500' : 'text-gray-500'}`}>{day}</div>
+      ));
+
+      for (let i = 0; i < firstDayOfMonth; i++) days.push(<div key={`e-${i}`} className="p-2"></div>);
+
+      for (let i = 1; i <= daysInMonth; i++) {
+        const d = new Date(currentDate.getFullYear(), currentDate.getMonth(), i);
+        const status = getDayStatus(d);
+        
+        days.push(
+          <div key={i} onClick={() => setSelectedDate(d)} className="p-1 cursor-pointer">
+            <div className={`h-12 rounded-xl flex flex-col items-center justify-center transition-all ${
+               status.isAvailable ? 'bg-emerald-50 border border-emerald-300 shadow-sm' : 'bg-white border border-gray-100'
+            } ${selectedDate?.toDateString() === d.toDateString() ? 'ring-2 ring-indigo-500' : ''}`}>
+              <span className={`text-sm font-medium ${d.getDay()===0 ? 'text-red-500' : d.getDay()===6 ? 'text-blue-500' : 'text-gray-700'}`}>{i}</span>
+              {status.isAvailable && <Check size={12} className="text-emerald-500 mt-1" strokeWidth={3} />}
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="p-4">
+          <div className="flex items-center justify-between mb-4 bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
+            <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))} className="p-1 hover:bg-gray-100 rounded-lg"><ChevronLeft size={20} className="text-gray-600"/></button>
+            <h2 className="text-lg font-bold text-gray-800">{currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月</h2>
+            <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))} className="p-1 hover:bg-gray-100 rounded-lg"><ChevronRight size={20} className="text-gray-600"/></button>
+          </div>
+          <div className="grid grid-cols-7 gap-1">{headers}{days}</div>
+        </div>
+      );
+    };
+
+    const renderGroupDayDetail = () => {
+      if (!selectedDate) return null;
+      const status = getDayStatus(selectedDate);
+      return (
+        <div className="p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-4">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-bold text-gray-800">
+              {selectedDate.getMonth() + 1}/{selectedDate.getDate()} の空き状況
+            </h3>
+            <button onClick={() => setSelectedDate(null)} className="p-1 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><X size={16} /></button>
+          </div>
+          <div className="space-y-2">
+            {status.detail.map((p) => {
+              const isAllOK = p.ngMembers.length === 0;
+              return (
+                <div key={p.period} className={`p-3 rounded-xl flex items-center gap-3 border ${isAllOK ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 border-gray-100'}`}>
+                  <div className={`w-12 text-center font-bold text-sm py-1 rounded-lg ${isAllOK ? 'bg-emerald-200 text-emerald-800' : 'bg-gray-200 text-gray-700'}`}>{p.period}限</div>
+                  <div className="flex-1">
+                    {isAllOK ? (
+                      <span className="text-sm font-bold text-emerald-600 flex items-center gap-1"><Check size={16} /> 全員空いています！</span>
+                    ) : (
+                      <div className="text-xs text-gray-600"><span className="font-medium text-red-500">{p.ngMembers.length}人NG</span>: {p.ngMembers.map(m => m.displayName).join(', ')}</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    };
+
+    const renderAvailableList = () => {
+        const list = generateAvailableList();
+        if(list.length === 0) return <div className="p-8 text-center text-gray-500">直近60日で全員が揃う日はありません。</div>;
+        return (
+            <div className="p-4 space-y-3">
+                {list.map((item, idx) => (
+                    <div key={idx} className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 flex items-center justify-between">
+                        <div>
+                            <div className="text-sm text-gray-500 mb-1">{item.date.getFullYear()}年</div>
+                            <div className="text-xl font-bold text-gray-800">{item.date.getMonth()+1}/{item.date.getDate()} <span className="text-sm text-gray-500">({['日','月','火','水','木','金','土'][item.date.getDay()]})</span></div>
+                        </div>
+                        <div className="flex gap-1 flex-wrap justify-end max-w-[150px]">
+                            {item.okPeriods.map(p => (
+                                <span key={p} className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-md">{p}限</span>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+    };
+
     return (
       <div className="flex flex-col h-full bg-gray-50">
         <div className="bg-white p-4 border-b flex items-center gap-3 sticky top-0 z-10">
-          <button onClick={() => setActiveGroup(null)} className="p-2 -ml-2 bg-gray-50 rounded-full"><ChevronLeft size={20}/></button>
+          <button onClick={() => setActiveGroup(null)} className="p-2 -ml-2 bg-gray-50 rounded-full hover:bg-gray-100"><ChevronLeft size={20} className="text-gray-700" /></button>
           <div>
-            <h2 className="text-xl font-bold">{activeGroup.name}</h2>
+            <h2 className="text-xl font-bold text-gray-900">{activeGroup.name}</h2>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs text-gray-500">メンバー {groupMembers.length}人</span>
-              <span className="text-[10px] bg-gray-100 px-2 py-0.5 rounded-full">コード: <strong className="font-mono">{activeGroup.joinCode}</strong></span>
+              <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">参加コード: <strong className="font-mono tracking-widest">{activeGroup.joinCode}</strong></span>
             </div>
           </div>
         </div>
@@ -459,17 +566,8 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             <button onClick={() => setGroupViewTab('list')} className={`flex-1 py-1.5 text-sm font-medium rounded-lg ${groupViewTab === 'list' ? 'bg-white shadow text-emerald-600' : 'text-gray-500'}`}>空いている日一覧</button>
         </div>
         {groupViewTab === 'calendar' ? (
-          <div className="p-4 text-center text-sm text-gray-500 bg-white m-4 rounded-2xl border">
-            グループの予定機能（カレンダー）は連携完了しました！<br/>「空いている日一覧」からメンバー全員が空いている日を確認できます。
-          </div>
-        ) : (
-          <div className="p-4">
-             {/* 簡易的な一覧表示 */}
-             <div className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 text-center">
-                 メンバーの予定を自動計算して表示します。（実装連携完了）
-             </div>
-          </div>
-        )}
+            <>{renderGroupCalendar()}{renderGroupDayDetail()}</>
+        ) : renderAvailableList()}
       </div>
     );
   }
@@ -477,48 +575,53 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   return (
     <div className="p-4 space-y-6">
       <div className="flex gap-2">
-        <button onClick={() => { setShowCreate(true); setShowJoin(false); }} className="flex-1 bg-indigo-600 text-white py-3 rounded-2xl font-bold text-sm">＋ 新規作成</button>
-        <button onClick={() => { setShowJoin(true); setShowCreate(false); }} className="flex-1 bg-white text-indigo-600 border border-indigo-200 py-3 rounded-2xl font-bold text-sm">コードで参加</button>
+        <button onClick={() => { setShowCreate(true); setShowJoin(false); }} className="flex-1 bg-indigo-600 text-white py-3 rounded-2xl font-bold text-sm shadow-sm hover:bg-indigo-700 transition-colors">＋ 新規作成</button>
+        <button onClick={() => { setShowJoin(true); setShowCreate(false); }} className="flex-1 bg-white text-indigo-600 border border-indigo-200 py-3 rounded-2xl font-bold text-sm shadow-sm hover:bg-indigo-50 transition-colors">コードで参加</button>
       </div>
 
       {showCreate && (
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-indigo-100">
-          <input type="text" placeholder="グループ名" className="w-full border p-3 rounded-xl mb-3 text-sm" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} />
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-indigo-100 animate-in fade-in zoom-in-95">
+          <h3 className="text-sm font-bold text-gray-800 mb-3">新しいグループを作成</h3>
+          <input type="text" placeholder="グループ名 (例: 夏フェスバンド)" className="w-full border border-gray-300 p-3 rounded-xl mb-3 text-sm focus:ring-2 focus:ring-indigo-500" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} />
           <div className="flex gap-2">
             <button onClick={handleCreateGroup} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-medium">作成</button>
-            <button onClick={() => setShowCreate(false)} className="px-4 bg-gray-100 py-2 rounded-xl text-sm font-medium">キャンセル</button>
+            <button onClick={() => setShowCreate(false)} className="px-4 bg-gray-100 text-gray-600 py-2 rounded-xl text-sm font-medium">キャンセル</button>
           </div>
         </div>
       )}
 
       {showJoin && (
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-indigo-100">
-          <input type="text" placeholder="6桁の参加コード" className="w-full border p-3 rounded-xl mb-3 text-sm font-mono uppercase" maxLength={6} value={joinCode} onChange={e => setJoinCode(e.target.value)} />
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-indigo-100 animate-in fade-in zoom-in-95">
+          <h3 className="text-sm font-bold text-gray-800 mb-3">グループに参加</h3>
+          <input type="text" placeholder="6桁の参加コードを入力" className="w-full border border-gray-300 p-3 rounded-xl mb-3 text-sm font-mono uppercase focus:ring-2 focus:ring-indigo-500" maxLength={6} value={joinCode} onChange={e => setJoinCode(e.target.value)} />
           <div className="flex gap-2">
             <button onClick={handleJoinGroup} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-medium">参加</button>
-            <button onClick={() => setShowJoin(false)} className="px-4 bg-gray-100 py-2 rounded-xl text-sm font-medium">キャンセル</button>
+            <button onClick={() => setShowJoin(false)} className="px-4 bg-gray-100 text-gray-600 py-2 rounded-xl text-sm font-medium">キャンセル</button>
           </div>
         </div>
       )}
 
       <div>
-        <h3 className="text-xs font-bold text-gray-500 mb-3 px-1">参加中のグループ</h3>
-        <div className="space-y-3">
-          {groups.map(group => (
-            <div key={group.id} onClick={() => setActiveGroup(group)} className="bg-white p-4 rounded-2xl shadow-sm border flex items-center justify-between cursor-pointer hover:border-indigo-300">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 font-bold">{group.name.substring(0,1)}</div>
-                <div><h4 className="font-bold text-gray-900">{group.name}</h4><p className="text-xs text-gray-500 mt-0.5">{group.members?.length || 1}人のメンバー</p></div>
+        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 px-1">参加中のグループ</h3>
+        {groups.length === 0 ? (
+          <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-gray-200"><p className="text-gray-400 text-sm">グループに所属していません</p></div>
+        ) : (
+          <div className="space-y-3">
+            {groups.map(group => (
+              <div key={group.id} onClick={() => setActiveGroup(group)} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer hover:border-indigo-300 transition-all active:scale-[0.98]">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl shadow-inner">{group.name.substring(0, 1)}</div>
+                  <div><h4 className="font-bold text-gray-900">{group.name}</h4><p className="text-xs text-gray-500 mt-0.5">{group.members.length}人のメンバー</p></div>
+                </div>
+                <ChevronRight className="text-gray-300" size={20} />
               </div>
-              <ChevronRight className="text-gray-300" size={20} />
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
 // --- ProfileView ---
 function ProfileView({ user }) {
   return (
