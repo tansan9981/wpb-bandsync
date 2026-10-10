@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from "firebase/app";
 import { 
@@ -46,9 +45,9 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('mySchedule');
   
-  // Auth state
+  // Auth state (confirmPasswordを追加しました)
   const [isLogin, setIsLogin] = useState(true);
-  const [authForm, setAuthForm] = useState({ username: '', password: '', displayName: '', year: '2026年度', parts: [] });
+  const [authForm, setAuthForm] = useState({ username: '', password: '', confirmPassword: '', displayName: '', year: '2026年度', parts: [] });
   const [authError, setAuthError] = useState('');
 
   // Data state
@@ -92,6 +91,13 @@ export default function App() {
         setAuthError('必須項目を入力してください。');
         return;
       }
+
+      // 【追加】パスワードが一致しているかのチェック
+      if (authForm.password !== authForm.confirmPassword) {
+        setAuthError('パスワードと確認用パスワードが一致しません。');
+        return;
+      }
+
       try {
         const newUser = {
           username: authForm.username,
@@ -132,7 +138,7 @@ export default function App() {
     setUser(null);
     setActiveTab('mySchedule');
     setActiveGroup(null);
-    setAuthForm({ username: '', password: '', displayName: '', year: '2026年度', parts: [] });
+    setAuthForm({ username: '', password: '', confirmPassword: '', displayName: '', year: '2026年度', parts: [] });
   };
 
   const togglePart = (part) => {
@@ -203,6 +209,24 @@ export default function App() {
                 />
               </div>
             </div>
+
+            {/* 【追加】新規登録時のみ表示されるパスワード再確認フィールド */}
+            {!isLogin && (
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">パスワード（再確認）</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400"><KeyRound size={14}/></span>
+                  <input 
+                    type="password" 
+                    className="block w-full pl-8 pr-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-shadow" 
+                    value={authForm.confirmPassword} 
+                    onChange={e => setAuthForm({...authForm, confirmPassword: e.target.value})}
+                    required={!isLogin}
+                    placeholder="もう一度入力してください"
+                  />
+                </div>
+              </div>
+            )}
 
             {!isLogin && (
               <div className="space-y-4 pt-4 border-t border-gray-100">
