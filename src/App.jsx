@@ -28,10 +28,22 @@ try {
   console.warn("Firebase Error:", e);
 }
 
-// --- Helper: Generate Join Code ---
-const generateJoinCode = () => {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
+// --- Shared Logic ---
+const generateJoinCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
+
+// 【追加】スケジュールの枠（限）を定義（昼休みを追加）
+const getPeriodListForDate = (date) => {
+  const day = date.getDay();
+  // 基本は1, 2, 昼休み, 3, 4
+  const base = ['1', '2', 'lunch', '3', '4'];
+  // 平日は5, 6限を追加
+  if (day !== 0 && day !== 6) base.push('5', '6');
+  return base;
 };
+
+// 【追加】表示名の変換
+const formatPeriod = (p) => p === 'lunch' ? '昼休み' : `${p}限`;
+
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -51,7 +63,6 @@ export default function App() {
     if (!db) { setAuthError('データベースに接続できません。'); return; }
     
     if (isLogin) {
-      // Login
       try {
         const q = query(collection(db, "users"), where("username", "==", authForm.username), where("password", "==", authForm.password));
         const querySnapshot = await getDocs(q);
@@ -61,59 +72,34 @@ export default function App() {
         } else {
           setAuthError('ユーザー名またはパスワードが間違っています。');
         }
-      } catch (err) {
-        setAuthError('エラーが発生しました: ' + err.message);
-      }
+      } catch (err) { setAuthError('エラーが発生しました: ' + err.message); }
     } else {
-      // Register
-      if (!authForm.username || !authForm.password || !authForm.displayName) {
-        setAuthError('必須項目を入力してください。');
-        return;
-      }
-      if (authForm.password !== authForm.confirmPassword) {
-        setAuthError('パスワードと確認用パスワードが一致しません。');
-        return;
-      }
+      if (!authForm.username || !authForm.password || !authForm.displayName) { setAuthError('必須項目を入力してください。'); return; }
+      if (authForm.password !== authForm.confirmPassword) { setAuthError('パスワードと確認用パスワードが一致しません。'); return; }
 
       try {
         const newUser = {
-          username: authForm.username,
-          password: authForm.password,
-          displayName: authForm.displayName,
-          year: authForm.year,
-          parts: authForm.parts,
-          createdAt: new Date().toISOString()
+          username: authForm.username, password: authForm.password,
+          displayName: authForm.displayName, year: authForm.year,
+          parts: authForm.parts, createdAt: new Date().toISOString()
         };
-        
-        // 重複チェック
         const q = query(collection(db, "users"), where("username", "==", authForm.username));
         const querySnapshot = await getDocs(q);
-        if(!querySnapshot.empty) {
-            setAuthError('このユーザー名は既に使用されています。');
-            return;
-        }
+        if(!querySnapshot.empty) { setAuthError('このユーザー名は既に使用されています。'); return; }
         
-        // 保存
         const docRef = await addDoc(collection(db, "users"), newUser);
         setUser({ id: docRef.id, ...newUser });
-      } catch (err) {
-        setAuthError('登録エラー: ' + err.message);
-      }
+      } catch (err) { setAuthError('登録エラー: ' + err.message); }
     }
   };
 
   const handleLogout = () => {
-    setUser(null);
-    setActiveTab('mySchedule');
-    setActiveGroup(null);
+    setUser(null); setActiveTab('mySchedule'); setActiveGroup(null);
     setAuthForm({ username: '', password: '', confirmPassword: '', displayName: '', year: '2026年度', parts: [] });
   };
 
   const togglePart = (part) => {
-    setAuthForm(prev => {
-      const parts = prev.parts.includes(part) ? prev.parts.filter(p => p !== part) : [...prev.parts, part];
-      return { ...prev, parts };
-    });
+    setAuthForm(prev => ({ ...prev, parts: prev.parts.includes(part) ? prev.parts.filter(p => p !== part) : [...prev.parts, part] }));
   };
 
   if (!user) {
@@ -124,14 +110,11 @@ export default function App() {
             <h1 className="text-3xl font-bold text-gray-900 tracking-tight">WPB BandSync</h1>
             <p className="text-sm text-gray-500 mt-2">バンドメンバーとスケジュールを共有しよう</p>
           </div>
-          
           <div className="flex bg-gray-100 p-1 rounded-xl mb-6">
             <button className={`flex-1 py-2 text-sm font-medium rounded-lg ${isLogin ? 'bg-white shadow text-indigo-600' : 'text-gray-500'}`} onClick={() => { setIsLogin(true); setAuthError(''); }}>ログイン</button>
             <button className={`flex-1 py-2 text-sm font-medium rounded-lg ${!isLogin ? 'bg-white shadow text-indigo-600' : 'text-gray-500'}`} onClick={() => { setIsLogin(false); setAuthError(''); }}>新規登録</button>
           </div>
-
           {authError && <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-xl">{authError}</div>}
-
           <form onSubmit={handleAuth} className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">ユーザー名 (ログインID)</label>
@@ -140,7 +123,6 @@ export default function App() {
                 <input type="text" className="block w-full pl-8 pr-3 py-2 border border-gray-300 rounded-xl sm:text-sm" value={authForm.username} onChange={e => setAuthForm({...authForm, username: e.target.value})} required />
               </div>
             </div>
-            
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">パスワード</label>
               <div className="relative">
@@ -148,7 +130,6 @@ export default function App() {
                 <input type="password" className="block w-full pl-8 pr-3 py-2 border border-gray-300 rounded-xl sm:text-sm" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} required />
               </div>
             </div>
-
             {!isLogin && (
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">パスワード（再確認）</label>
@@ -158,7 +139,6 @@ export default function App() {
                 </div>
               </div>
             )}
-
             {!isLogin && (
               <div className="space-y-4 pt-4 border-t border-gray-100">
                 <div>
@@ -198,14 +178,12 @@ export default function App() {
           <button onClick={handleLogout} className="text-gray-400 hover:text-gray-600"><LogOut size={20} /></button>
         </div>
       </header>
-
       <main className="flex-1 w-full max-w-md mx-auto overflow-y-auto pb-20 relative">
         {activeTab === 'mySchedule' && <MyScheduleView user={user} />}
         {activeTab === 'groups' && <GroupsView user={user} activeGroup={activeGroup} setActiveGroup={setActiveGroup} />}
         {activeTab === 'profile' && <ProfileView user={user} />}
         {activeTab === 'admin' && user.username === 'Boss' && <AdminView />}
       </main>
-
       <nav className="bg-white border-t border-gray-200 fixed bottom-0 w-full z-20 pb-safe">
         <div className="max-w-md mx-auto flex">
           <button onClick={() => setActiveTab('mySchedule')} className={`flex-1 py-3 flex flex-col items-center justify-center space-y-1 ${activeTab === 'mySchedule' ? 'text-indigo-600' : 'text-gray-400'}`}><CalendarIcon size={22} /><span className="text-[10px] font-medium">マイ予定</span></button>
@@ -223,6 +201,9 @@ function MyScheduleView({ user }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
   const [mySchedules, setMySchedules] = useState([]);
+  
+  // 【追加】入力モード（x:行けない, triangle:微妙）
+  const [inputStatus, setInputStatus] = useState('x'); 
 
   useEffect(() => {
     if (!db) return;
@@ -234,18 +215,45 @@ function MyScheduleView({ user }) {
     fetchSchedules();
   }, [user]);
 
-  const toggleNG = async (date, period, type = 'once') => {
+  // 【変更】スケジュールの状態を検索
+  const getScheduleRule = (date, period) => {
+    const rules = mySchedules.filter(r => r.period === period);
     const dStr = date.toISOString().split('T')[0];
-    const existingIdx = mySchedules.findIndex(r => r.period === period && ((r.type === 'once' && r.date === dStr) || (r.type === 'daily' && type === 'daily') || (r.type === 'weekly' && r.dayOfWeek === date.getDay() && type === 'weekly') || (r.type === 'monthly' && r.dayOfMonth === date.getDate() && type === 'monthly')));
+    const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
+    if (onceRule) return { ...onceRule, status: onceRule.status || 'x' };
+    const weeklyRule = rules.find(r => r.type === 'weekly' && r.dayOfWeek === date.getDay());
+    if (weeklyRule) return { ...weeklyRule, status: weeklyRule.status || 'x' };
+    const monthlyRule = rules.find(r => r.type === 'monthly' && r.dayOfMonth === date.getDate());
+    if (monthlyRule) return { ...monthlyRule, status: monthlyRule.status || 'x' };
+    const dailyRule = rules.find(r => r.type === 'daily');
+    if (dailyRule) return { ...dailyRule, status: dailyRule.status || 'x' };
+    return null;
+  };
+
+  // 【変更】ステータスを含めた登録処理
+  const toggleSchedule = async (date, period, type, newStatus) => {
+    const dStr = date.toISOString().split('T')[0];
+    const existingIdx = mySchedules.findIndex(r => 
+      r.period === period && r.type === type && 
+      ((type === 'once' && r.date === dStr) || type === 'daily' || (type === 'weekly' && r.dayOfWeek === date.getDay()) || (type === 'monthly' && r.dayOfMonth === date.getDate()))
+    );
 
     try {
       let newSchedules = [...mySchedules];
       if (existingIdx >= 0) {
-        const ruleId = mySchedules[existingIdx].id;
-        await deleteDoc(doc(db, "schedules", ruleId));
-        newSchedules.splice(existingIdx, 1);
+        const rule = mySchedules[existingIdx];
+        if (rule.status === newStatus || (!rule.status && newStatus === 'x')) {
+          // 同じステータスなら削除（解除）
+          await deleteDoc(doc(db, "schedules", rule.id));
+          newSchedules.splice(existingIdx, 1);
+        } else {
+          // 違うステータスなら上書き
+          await updateDoc(doc(db, "schedules", rule.id), { status: newStatus });
+          newSchedules[existingIdx].status = newStatus;
+        }
       } else {
-        let newRule = { userId: user.id, period, type };
+        // 新規登録
+        let newRule = { userId: user.id, period, type, status: newStatus };
         if (type === 'once') newRule.date = dStr;
         if (type === 'weekly') newRule.dayOfWeek = date.getDay();
         if (type === 'monthly') newRule.dayOfMonth = date.getDate();
@@ -254,24 +262,8 @@ function MyScheduleView({ user }) {
         newSchedules.push({ id: docRef.id, ...newRule });
       }
       setMySchedules(newSchedules);
-    } catch(e) {
-      alert("更新エラー: Firebaseの設定(ルール)を確認してください");
-    }
+    } catch(e) { alert("更新エラー: Firebaseの設定を確認してください"); }
   };
-
-  const isNG = (date, period) => {
-    return mySchedules.some(rule => {
-      if (rule.period !== period) return false;
-      const d = new Date(date);
-      if (rule.type === 'once') return rule.date === d.toISOString().split('T')[0];
-      if (rule.type === 'daily') return true;
-      if (rule.type === 'weekly') return d.getDay() === rule.dayOfWeek;
-      if (rule.type === 'monthly') return d.getDate() === rule.dayOfMonth;
-      return false;
-    });
-  };
-
-  const getPeriodsForDate = (date) => (date.getDay() === 0 || date.getDay() === 6) ? 4 : 6;
 
   const renderCalendar = () => {
     const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
@@ -281,15 +273,26 @@ function MyScheduleView({ user }) {
     for (let i = 0; i < firstDayOfMonth; i++) days.push(<div key={`e-${i}`} className="p-2"></div>);
     for (let i = 1; i <= daysInMonth; i++) {
       const d = new Date(currentDate.getFullYear(), currentDate.getMonth(), i);
-      const periods = getPeriodsForDate(d);
-      let hasNG = false;
-      for(let p=1; p<=periods; p++) { if(isNG(d, p)) hasNG = true; }
+      const periods = getPeriodListForDate(d);
+      
+      let hasX = false;
+      let hasTriangle = false;
+      periods.forEach(p => {
+        const rule = getScheduleRule(d, p);
+        if (rule) {
+          if (rule.status === 'triangle') hasTriangle = true;
+          else hasX = true; // x or undefined
+        }
+      });
       
       days.push(
         <div key={i} onClick={() => setSelectedDate(d)} className="p-1 cursor-pointer">
-          <div className={`h-12 rounded-xl flex flex-col items-center justify-center border ${hasNG ? 'bg-white' : 'bg-indigo-50 border-indigo-100'} ${selectedDate?.toDateString() === d.toDateString() ? 'ring-2 ring-indigo-500' : ''}`}>
+          <div className={`h-12 rounded-xl flex flex-col items-center justify-center border ${hasX ? 'bg-white border-gray-200' : hasTriangle ? 'bg-amber-50 border-amber-100' : 'bg-indigo-50 border-indigo-100'} ${selectedDate?.toDateString() === d.toDateString() ? 'ring-2 ring-indigo-500' : ''}`}>
             <span className={`text-sm font-medium ${d.getDay()===0 ? 'text-red-500' : d.getDay()===6 ? 'text-blue-500' : 'text-gray-700'}`}>{i}</span>
-            {hasNG && <div className="flex gap-0.5 mt-1"><span className="w-1.5 h-1.5 rounded-full bg-red-400"></span></div>}
+            <div className="flex gap-0.5 mt-1">
+              {hasX && <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span>}
+              {!hasX && hasTriangle && <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>}
+            </div>
           </div>
         </div>
       );
@@ -311,29 +314,54 @@ function MyScheduleView({ user }) {
 
   const renderDayDetail = () => {
     if (!selectedDate) return null;
-    const periods = getPeriodsForDate(selectedDate);
+    const periods = getPeriodListForDate(selectedDate);
     return (
       <div className="p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-4">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-bold">{selectedDate.getMonth() + 1}/{selectedDate.getDate()} の予定</h3>
           <button onClick={() => setSelectedDate(null)} className="p-1 bg-gray-100 rounded-full"><X size={16}/></button>
         </div>
+        
+        {/* 【追加】入力モードの切り替え */}
+        <div className="flex gap-2 mb-4 bg-gray-100 p-1 rounded-xl">
+          <button onClick={() => setInputStatus('x')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${inputStatus === 'x' ? 'bg-red-500 text-white shadow' : 'text-gray-500'}`}>× 行けない</button>
+          <button onClick={() => setInputStatus('triangle')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${inputStatus === 'triangle' ? 'bg-amber-500 text-white shadow' : 'text-gray-500'}`}>△ 微妙</button>
+        </div>
+        <p className="text-xs text-gray-500 mb-4 bg-gray-50 p-2 rounded-lg">上のボタンで「×」か「△」を選んでから、下の枠をタップしてください。</p>
+
         <div className="space-y-3">
-          {[...Array(periods)].map((_, i) => {
-            const period = i + 1;
-            const currentlyNG = isNG(selectedDate, period);
-            let ruleType = null;
-            if(currentlyNG) {
-                const r = mySchedules.find(r => r.period === period && ((r.type === 'once' && r.date === selectedDate.toISOString().split('T')[0]) || r.type === 'daily' || (r.type === 'weekly' && r.dayOfWeek === selectedDate.getDay()) || (r.type === 'monthly' && r.dayOfMonth === selectedDate.getDate())));
-                if(r) ruleType = r.type;
-            }
+          {periods.map(period => {
+            const rule = getScheduleRule(selectedDate, period);
+            const isActive = !!rule;
+            const activeType = rule ? rule.type : null;
+            const activeStatus = rule ? (rule.status || 'x') : null;
+            
+            const btnColor = (type) => {
+              if (isActive && activeType === type) {
+                return activeStatus === 'x' ? 'bg-red-500 text-white' : 'bg-amber-500 text-white';
+              }
+              if (isActive) return 'bg-gray-100 text-gray-400 opacity-50';
+              return 'bg-gray-100 text-gray-600 hover:bg-gray-200';
+            };
+
             return (
               <div key={period} className="flex items-center gap-2">
-                <div className="w-10 text-center font-bold bg-gray-100 py-2 rounded-xl text-sm">{period}限</div>
+                <div className={`w-14 text-center font-bold py-2 rounded-xl text-xs ${isActive ? (activeStatus==='x'?'bg-red-100 text-red-700':'bg-amber-100 text-amber-700') : 'bg-gray-100 text-gray-700'}`}>
+                  {formatPeriod(period)}
+                </div>
                 <div className="flex-1 grid grid-cols-4 gap-1">
                   {['once:この日', 'weekly:毎週', 'monthly:毎月', 'daily:毎日'].map(t => {
                     const [type, label] = t.split(':');
-                    return <button key={type} onClick={() => toggleNG(selectedDate, period, type)} disabled={currentlyNG && ruleType !== type} className={`py-2 text-[10px] font-medium rounded-xl ${currentlyNG && ruleType === type ? 'bg-red-500 text-white' : currentlyNG ? 'bg-gray-100 text-gray-400 opacity-50' : 'bg-gray-100 text-gray-600 hover:bg-red-50 hover:text-red-600'}`}>{label}</button>;
+                    return (
+                      <button 
+                        key={type} 
+                        onClick={() => toggleSchedule(selectedDate, period, type, inputStatus)} 
+                        disabled={isActive && activeType !== type} 
+                        className={`py-2 text-[10px] font-medium rounded-xl ${btnColor(type)}`}
+                      >
+                        {label}
+                      </button>
+                    );
                   })}
                 </div>
               </div>
@@ -415,41 +443,62 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     } catch(e) { alert("参加エラー"); }
   };
 
-  const isUserNG = (userId, date, period) => {
-    return allSchedules.some(rule => {
-      if (rule.userId !== userId || rule.period !== period) return false;
-      const d = new Date(date);
-      if (rule.type === 'once') return rule.date === d.toISOString().split('T')[0];
-      if (rule.type === 'daily') return true;
-      if (rule.type === 'weekly') return d.getDay() === rule.dayOfWeek;
-      if (rule.type === 'monthly') return d.getDate() === rule.dayOfMonth;
-      return false;
-    });
+  // 【変更】ユーザーのスケジュールを検索してステータスを返す
+  const getUserScheduleRule = (userId, date, period) => {
+    const rules = allSchedules.filter(r => r.userId === userId && r.period === period);
+    const dStr = date.toISOString().split('T')[0];
+    const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
+    if (onceRule) return { ...onceRule, status: onceRule.status || 'x' };
+    const weeklyRule = rules.find(r => r.type === 'weekly' && r.dayOfWeek === date.getDay());
+    if (weeklyRule) return { ...weeklyRule, status: weeklyRule.status || 'x' };
+    const monthlyRule = rules.find(r => r.type === 'monthly' && r.dayOfMonth === date.getDate());
+    if (monthlyRule) return { ...monthlyRule, status: monthlyRule.status || 'x' };
+    const dailyRule = rules.find(r => r.type === 'daily');
+    if (dailyRule) return { ...dailyRule, status: dailyRule.status || 'x' };
+    return null;
   };
 
+  // 【変更】1日の中の「×」と「△」を計算
   const getDayStatus = (date) => {
-    if(groupMembers.length === 0) return { isAvailable: false, detail: [] };
-    const periods = (date.getDay() === 0 || date.getDay() === 6) ? 4 : 6;
+    if(groupMembers.length === 0) return { dayStatus: 'ng', detail: [] };
+    const periods = getPeriodListForDate(date);
     const detail = [];
     let isAnyPeriodAllOK = false;
-    for (let p = 1; p <= periods; p++) {
-      const ngMembers = groupMembers.filter(m => isUserNG(m.id, date, p));
-      detail.push({ period: p, ngMembers });
-      if (ngMembers.length === 0) isAnyPeriodAllOK = true;
+    let isAnyPeriodTriangleOnly = false;
+
+    for (let p of periods) {
+      const xMembers = [];
+      const triangleMembers = [];
+      groupMembers.forEach(m => {
+        const rule = getUserScheduleRule(m.id, date, p);
+        if (rule) {
+          if (rule.status === 'triangle') triangleMembers.push(m);
+          else xMembers.push(m); // x or undefined
+        }
+      });
+      detail.push({ period: p, xMembers, triangleMembers });
+      
+      if (xMembers.length === 0 && triangleMembers.length === 0) isAnyPeriodAllOK = true;
+      else if (xMembers.length === 0 && triangleMembers.length > 0) isAnyPeriodTriangleOnly = true;
     }
-    return { isAvailable: isAnyPeriodAllOK, detail };
+    
+    let dayStatus = 'ng';
+    if (isAnyPeriodAllOK) dayStatus = 'ok';
+    else if (isAnyPeriodTriangleOnly) dayStatus = 'triangle';
+
+    return { dayStatus, detail };
   };
 
   const generateAvailableList = () => {
     const list = [];
     const today = new Date();
-    // 60日先までチェック
     for(let i=0; i<60; i++) {
         const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
         const status = getDayStatus(d);
-        if(status.isAvailable) {
-            const okPeriods = status.detail.filter(p => p.ngMembers.length === 0).map(p => p.period);
-            list.push({ date: d, okPeriods });
+        if(status.dayStatus === 'ok' || status.dayStatus === 'triangle') {
+            const okPeriods = status.detail.filter(p => p.xMembers.length === 0 && p.triangleMembers.length === 0).map(p => p.period);
+            const trianglePeriods = status.detail.filter(p => p.xMembers.length === 0 && p.triangleMembers.length > 0).map(p => p.period);
+            list.push({ date: d, okPeriods, trianglePeriods });
         }
     }
     return list;
@@ -471,13 +520,21 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         const d = new Date(currentDate.getFullYear(), currentDate.getMonth(), i);
         const status = getDayStatus(d);
         
+        let bgColor = 'bg-white border border-gray-100';
+        let icon = null;
+        if (status.dayStatus === 'ok') {
+          bgColor = 'bg-emerald-50 border border-emerald-300 shadow-sm';
+          icon = <Check size={12} className="text-emerald-500 mt-1" strokeWidth={3} />;
+        } else if (status.dayStatus === 'triangle') {
+          bgColor = 'bg-amber-50 border border-amber-300 shadow-sm';
+          icon = <span className="text-amber-500 text-[10px] font-bold mt-1">△</span>;
+        }
+        
         days.push(
           <div key={i} onClick={() => setSelectedDate(d)} className="p-1 cursor-pointer">
-            <div className={`h-12 rounded-xl flex flex-col items-center justify-center transition-all ${
-               status.isAvailable ? 'bg-emerald-50 border border-emerald-300 shadow-sm' : 'bg-white border border-gray-100'
-            } ${selectedDate?.toDateString() === d.toDateString() ? 'ring-2 ring-indigo-500' : ''}`}>
+            <div className={`h-12 rounded-xl flex flex-col items-center justify-center transition-all ${bgColor} ${selectedDate?.toDateString() === d.toDateString() ? 'ring-2 ring-indigo-500' : ''}`}>
               <span className={`text-sm font-medium ${d.getDay()===0 ? 'text-red-500' : d.getDay()===6 ? 'text-blue-500' : 'text-gray-700'}`}>{i}</span>
-              {status.isAvailable && <Check size={12} className="text-emerald-500 mt-1" strokeWidth={3} />}
+              {icon}
             </div>
           </div>
         );
@@ -508,15 +565,25 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           </div>
           <div className="space-y-2">
             {status.detail.map((p) => {
-              const isAllOK = p.ngMembers.length === 0;
+              const isAllOK = p.xMembers.length === 0 && p.triangleMembers.length === 0;
+              const isTriangle = p.xMembers.length === 0 && p.triangleMembers.length > 0;
+              
+              let itemBg = 'bg-gray-50 border-gray-100';
+              let badgeBg = 'bg-gray-200 text-gray-700';
+              if (isAllOK) { itemBg = 'bg-emerald-50 border-emerald-200'; badgeBg = 'bg-emerald-200 text-emerald-800'; } 
+              else if (isTriangle) { itemBg = 'bg-amber-50 border-amber-200'; badgeBg = 'bg-amber-200 text-amber-800'; }
+
               return (
-                <div key={p.period} className={`p-3 rounded-xl flex items-center gap-3 border ${isAllOK ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 border-gray-100'}`}>
-                  <div className={`w-12 text-center font-bold text-sm py-1 rounded-lg ${isAllOK ? 'bg-emerald-200 text-emerald-800' : 'bg-gray-200 text-gray-700'}`}>{p.period}限</div>
+                <div key={p.period} className={`p-3 rounded-xl flex items-center gap-3 border ${itemBg}`}>
+                  <div className={`w-14 text-center font-bold text-xs py-1.5 rounded-lg ${badgeBg}`}>{formatPeriod(p.period)}</div>
                   <div className="flex-1">
                     {isAllOK ? (
                       <span className="text-sm font-bold text-emerald-600 flex items-center gap-1"><Check size={16} /> 全員空いています！</span>
                     ) : (
-                      <div className="text-xs text-gray-600"><span className="font-medium text-red-500">{p.ngMembers.length}人NG</span>: {p.ngMembers.map(m => m.displayName).join(', ')}</div>
+                      <div className="text-xs text-gray-600 space-y-1">
+                        {p.xMembers.length > 0 && <div><span className="font-medium text-red-500">× ({p.xMembers.length}人)</span>: {p.xMembers.map(m => m.displayName).join(', ')}</div>}
+                        {p.triangleMembers.length > 0 && <div><span className="font-medium text-amber-600">△ ({p.triangleMembers.length}人)</span>: {p.triangleMembers.map(m => m.displayName).join(', ')}</div>}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -538,10 +605,17 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                             <div className="text-sm text-gray-500 mb-1">{item.date.getFullYear()}年</div>
                             <div className="text-xl font-bold text-gray-800">{item.date.getMonth()+1}/{item.date.getDate()} <span className="text-sm text-gray-500">({['日','月','火','水','木','金','土'][item.date.getDay()]})</span></div>
                         </div>
-                        <div className="flex gap-1 flex-wrap justify-end max-w-[150px]">
-                            {item.okPeriods.map(p => (
-                                <span key={p} className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-md">{p}限</span>
-                            ))}
+                        <div className="flex flex-col gap-1 items-end">
+                            {item.okPeriods.length > 0 && (
+                              <div className="flex gap-1 flex-wrap justify-end">
+                                  {item.okPeriods.map(p => <span key={`ok-${p}`} className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-md">〇 {formatPeriod(p)}</span>)}
+                              </div>
+                            )}
+                            {item.trianglePeriods.length > 0 && (
+                              <div className="flex gap-1 flex-wrap justify-end mt-1">
+                                  {item.trianglePeriods.map(p => <span key={`tri-${p}`} className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md">△ {formatPeriod(p)}</span>)}
+                              </div>
+                            )}
                         </div>
                     </div>
                 ))}
@@ -622,13 +696,20 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     </div>
   );
 }
+
 // --- ProfileView ---
 function ProfileView({ user }) {
   return (
     <div className="p-4 space-y-4">
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center">
-        <h2 className="text-2xl font-bold">{user.displayName}</h2>
-        <p className="text-sm text-gray-500">@{user.username}</p>
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-indigo-500 to-purple-500 opacity-10"></div>
+        <div className="w-24 h-24 bg-white border-4 border-white shadow-lg rounded-full flex items-center justify-center text-indigo-600 font-bold text-4xl mx-auto mb-4 relative z-10">{user.displayName.substring(0, 1)}</div>
+        <h2 className="text-2xl font-bold text-gray-900">{user.displayName}</h2>
+        <p className="text-sm text-gray-500 mt-1">@{user.username}</p>
+        <div className="mt-6 flex justify-center gap-2 flex-wrap">
+          <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs font-medium border border-gray-200">{user.year}</span>
+          {user.parts.map(part => <span key={part} className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold border border-indigo-100">{part}</span>)}
+        </div>
       </div>
     </div>
   );
@@ -659,34 +740,32 @@ function AdminView() {
         await deleteDoc(doc(db, "groups", id));
         setGroups(groups.filter(g => g.id !== id));
       }
-    } catch(e) {
-      alert("削除に失敗しました（権限がありません）");
-    }
+    } catch(e) { alert("削除に失敗しました"); }
   };
 
   return (
     <div className="p-4 space-y-6">
       <div className="bg-red-50 border border-red-200 p-4 rounded-2xl flex items-start gap-3">
-        <Shield className="text-red-500" size={24} />
+        <Shield className="text-red-500 shrink-0 mt-0.5" size={24} />
         <div><h2 className="text-red-800 font-bold">管理者ダッシュボード</h2></div>
       </div>
       <div>
-        <h3 className="text-sm font-bold border-b pb-2">全ユーザー一覧 ({users.length})</h3>
-        <div className="space-y-2 mt-2">
+        <h3 className="text-sm font-bold text-gray-800 mb-3 border-b pb-2">全ユーザー一覧 ({users.length})</h3>
+        <div className="space-y-2">
           {users.map(u => (
             <div key={u.id} className="bg-white p-3 rounded-xl shadow-sm border flex justify-between">
-              <div><p className="font-bold">{u.displayName}</p><p className="text-[10px]">@{u.username}</p></div>
+              <div><p className="font-bold text-sm text-gray-900">{u.displayName}</p><p className="text-[10px] text-gray-500">@{u.username}</p></div>
               {u.username !== 'Boss' && <button onClick={() => handleDelete('user', u.id)} className="text-red-500 p-2"><Trash2 size={16}/></button>}
             </div>
           ))}
         </div>
       </div>
       <div>
-        <h3 className="text-sm font-bold border-b pb-2 mt-6">全グループ一覧 ({groups.length})</h3>
-        <div className="space-y-2 mt-2">
+        <h3 className="text-sm font-bold text-gray-800 mb-3 border-b pb-2 mt-6">全グループ一覧 ({groups.length})</h3>
+        <div className="space-y-2">
           {groups.map(g => (
             <div key={g.id} className="bg-white p-3 rounded-xl shadow-sm border flex justify-between">
-              <div><p className="font-bold">{g.name}</p><p className="text-[10px]">コード: {g.joinCode}</p></div>
+              <div><p className="font-bold text-sm text-gray-900">{g.name}</p><p className="text-[10px] text-gray-500">コード: {g.joinCode}</p></div>
               <button onClick={() => handleDelete('group', g.id)} className="text-red-500 p-2"><Trash2 size={16}/></button>
             </div>
           ))}
