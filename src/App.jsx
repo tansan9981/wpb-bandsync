@@ -31,7 +31,7 @@ try {
 // --- Shared Logic ---
 const generateJoinCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
-// 【追加】スケジュールの枠（限）を定義（昼休みを追加）
+// スケジュールの枠（限）を定義（昼休みを追加）
 const getPeriodListForDate = (date) => {
   const day = date.getDay();
   // 基本は1, 2, 昼休み, 3, 4
@@ -41,9 +41,8 @@ const getPeriodListForDate = (date) => {
   return base;
 };
 
-// 【追加】表示名の変換
+// 表示名の変換
 const formatPeriod = (p) => p === 'lunch' ? '昼休み' : `${p}限`;
-
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -202,7 +201,6 @@ function MyScheduleView({ user }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [mySchedules, setMySchedules] = useState([]);
   
-  // 【追加】入力モード（x:行けない, triangle:微妙）
   const [inputStatus, setInputStatus] = useState('x'); 
 
   useEffect(() => {
@@ -215,7 +213,6 @@ function MyScheduleView({ user }) {
     fetchSchedules();
   }, [user]);
 
-  // 【変更】スケジュールの状態を検索
   const getScheduleRule = (date, period) => {
     const rules = mySchedules.filter(r => r.period === period);
     const dStr = date.toISOString().split('T')[0];
@@ -230,7 +227,6 @@ function MyScheduleView({ user }) {
     return null;
   };
 
-  // 【変更】ステータスを含めた登録処理
   const toggleSchedule = async (date, period, type, newStatus) => {
     const dStr = date.toISOString().split('T')[0];
     const existingIdx = mySchedules.findIndex(r => 
@@ -243,16 +239,13 @@ function MyScheduleView({ user }) {
       if (existingIdx >= 0) {
         const rule = mySchedules[existingIdx];
         if (rule.status === newStatus || (!rule.status && newStatus === 'x')) {
-          // 同じステータスなら削除（解除）
           await deleteDoc(doc(db, "schedules", rule.id));
           newSchedules.splice(existingIdx, 1);
         } else {
-          // 違うステータスなら上書き
           await updateDoc(doc(db, "schedules", rule.id), { status: newStatus });
           newSchedules[existingIdx].status = newStatus;
         }
       } else {
-        // 新規登録
         let newRule = { userId: user.id, period, type, status: newStatus };
         if (type === 'once') newRule.date = dStr;
         if (type === 'weekly') newRule.dayOfWeek = date.getDay();
@@ -281,7 +274,7 @@ function MyScheduleView({ user }) {
         const rule = getScheduleRule(d, p);
         if (rule) {
           if (rule.status === 'triangle') hasTriangle = true;
-          else hasX = true; // x or undefined
+          else hasX = true;
         }
       });
       
@@ -322,7 +315,6 @@ function MyScheduleView({ user }) {
           <button onClick={() => setSelectedDate(null)} className="p-1 bg-gray-100 rounded-full"><X size={16}/></button>
         </div>
         
-        {/* 【追加】入力モードの切り替え */}
         <div className="flex gap-2 mb-4 bg-gray-100 p-1 rounded-xl">
           <button onClick={() => setInputStatus('x')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${inputStatus === 'x' ? 'bg-red-500 text-white shadow' : 'text-gray-500'}`}>× 行けない</button>
           <button onClick={() => setInputStatus('triangle')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${inputStatus === 'triangle' ? 'bg-amber-500 text-white shadow' : 'text-gray-500'}`}>△ 微妙</button>
@@ -384,7 +376,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   
   const [groupMembers, setGroupMembers] = useState([]);
   const [allSchedules, setAllSchedules] = useState([]);
-  const [groupViewTab, setGroupViewTab] = useState('calendar');
+  const [groupViewTab, setGroupViewTab] = useState('calendar'); // 'calendar' | 'list' | 'members'
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
 
@@ -443,7 +435,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     } catch(e) { alert("参加エラー"); }
   };
 
-  // 【変更】ユーザーのスケジュールを検索してステータスを返す
   const getUserScheduleRule = (userId, date, period) => {
     const rules = allSchedules.filter(r => r.userId === userId && r.period === period);
     const dStr = date.toISOString().split('T')[0];
@@ -458,7 +449,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     return null;
   };
 
-  // 【変更】1日の中の「×」と「△」を計算
   const getDayStatus = (date) => {
     if(groupMembers.length === 0) return { dayStatus: 'ng', detail: [] };
     const periods = getPeriodListForDate(date);
@@ -473,7 +463,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         const rule = getUserScheduleRule(m.id, date, p);
         if (rule) {
           if (rule.status === 'triangle') triangleMembers.push(m);
-          else xMembers.push(m); // x or undefined
+          else xMembers.push(m);
         }
       });
       detail.push({ period: p, xMembers, triangleMembers });
@@ -487,21 +477,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     else if (isAnyPeriodTriangleOnly) dayStatus = 'triangle';
 
     return { dayStatus, detail };
-  };
-
-  const generateAvailableList = () => {
-    const list = [];
-    const today = new Date();
-    for(let i=0; i<60; i++) {
-        const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
-        const status = getDayStatus(d);
-        if(status.dayStatus === 'ok' || status.dayStatus === 'triangle') {
-            const okPeriods = status.detail.filter(p => p.xMembers.length === 0 && p.triangleMembers.length === 0).map(p => p.period);
-            const trianglePeriods = status.detail.filter(p => p.xMembers.length === 0 && p.triangleMembers.length > 0).map(p => p.period);
-            list.push({ date: d, okPeriods, trianglePeriods });
-        }
-    }
-    return list;
   };
 
   if (activeGroup) {
@@ -594,54 +569,163 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       );
     };
 
+    // 【大幅変更】4つのカテゴリに対応した空き日一覧の生成
     const renderAvailableList = () => {
-        const list = generateAvailableList();
-        if(list.length === 0) return <div className="p-8 text-center text-gray-500">直近60日で全員が揃う日はありません。</div>;
-        return (
-            <div className="p-4 space-y-3">
-                {list.map((item, idx) => (
-                    <div key={idx} className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 flex items-center justify-between">
-                        <div>
-                            <div className="text-sm text-gray-500 mb-1">{item.date.getFullYear()}年</div>
-                            <div className="text-xl font-bold text-gray-800">{item.date.getMonth()+1}/{item.date.getDate()} <span className="text-sm text-gray-500">({['日','月','火','水','木','金','土'][item.date.getDay()]})</span></div>
+      const today = new Date();
+      const list = [];
+      const totalMembers = groupMembers.length;
+
+      if (totalMembers === 0) return <div className="p-8 text-center text-gray-500">メンバーがいません。</div>;
+
+      for(let i=0; i<60; i++) {
+        const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+        const periods = getPeriodListForDate(d);
+        const dayPeriods = [];
+
+        for (let p of periods) {
+          const xMembers = [];
+          const triangleMembers = [];
+          groupMembers.forEach(m => {
+            const rule = getUserScheduleRule(m.id, d, p);
+            if (rule) {
+              if (rule.status === 'triangle') triangleMembers.push(m);
+              else xMembers.push(m);
+            }
+          });
+
+          const xCount = xMembers.length;
+          const triCount = triangleMembers.length;
+
+          // 全員NGの枠は非表示（除外）
+          if (xCount === totalMembers) continue; 
+
+          let category = 0;
+          if (xCount === 0 && triCount === 0) category = 1;      // ①全員〇
+          else if (xCount === 0 && triCount > 0) category = 2;   // ②全員OKだが△あり
+          else if (xCount > 0 && triCount === 0) category = 3;   // ③一部NG、残りは全員〇
+          else if (xCount > 0 && triCount > 0) category = 4;     // ④一部NG、残りに△あり
+
+          dayPeriods.push({ period: p, category, xMembers, triangleMembers });
+        }
+
+        if (dayPeriods.length > 0) {
+          list.push({ date: d, dayPeriods });
+        }
+      }
+
+      if (list.length === 0) return <div className="p-8 text-center text-gray-500">直近60日で1人でも参加できる枠はありません。</div>;
+
+      return (
+        <div className="p-4 space-y-4">
+          <div className="bg-white p-3 rounded-xl shadow-sm border text-xs space-y-1.5">
+            <div className="font-bold text-gray-700 mb-2 border-b pb-1">状況の見方</div>
+            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">◎ 全員参加</span> 全員が「〇」の枠</div>
+            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">〇 全員OK</span> 全員参加できるが「△」を含む</div>
+            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-bold">△ 一部NG</span> 欠席者がいるが、参加者は全員「〇」</div>
+            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-red-100 text-red-700 font-bold">▲ 要調整</span> 欠席者がおり、参加者にも「△」を含む</div>
+          </div>
+
+          {list.map((item, idx) => (
+            <div key={idx} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+              <div className="border-b border-gray-50 pb-2 mb-3">
+                <span className="text-sm text-gray-500">{item.date.getFullYear()}年</span>
+                <span className="text-lg font-bold text-gray-800 ml-1">
+                  {item.date.getMonth()+1}/{item.date.getDate()} 
+                  <span className="text-sm text-gray-500 ml-1">({['日','月','火','水','木','金','土'][item.date.getDay()]})</span>
+                </span>
+              </div>
+              <div className="space-y-3">
+                {item.dayPeriods.map(dp => {
+                  let badge = '';
+                  if (dp.category === 1) badge = <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">◎ 全員参加</span>;
+                  if (dp.category === 2) badge = <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">〇 全員OK(△有)</span>;
+                  if (dp.category === 3) badge = <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">△ 一部NG(残〇)</span>;
+                  if (dp.category === 4) badge = <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">▲ 要調整(△有)</span>;
+
+                  return (
+                    <div key={dp.period} className="flex flex-col gap-1.5 p-2.5 bg-gray-50 rounded-xl border border-gray-100">
+                      <div className="flex items-center gap-3">
+                        <span className="font-bold text-gray-800 w-12 text-center text-sm">{formatPeriod(dp.period)}</span>
+                        {badge}
+                      </div>
+                      {(dp.xMembers.length > 0 || dp.triangleMembers.length > 0) && (
+                        <div className="text-[11px] ml-14 space-y-0.5 mt-1">
+                          {dp.xMembers.length > 0 && (
+                            <div className="text-red-600">
+                              <span className="font-bold">×({dp.xMembers.length}人):</span> {dp.xMembers.map(m => m.displayName).join(', ')}
+                            </div>
+                          )}
+                          {dp.triangleMembers.length > 0 && (
+                            <div className="text-amber-600">
+                              <span className="font-bold">△({dp.triangleMembers.length}人):</span> {dp.triangleMembers.map(m => m.displayName).join(', ')}
+                            </div>
+                          )}
                         </div>
-                        <div className="flex flex-col gap-1 items-end">
-                            {item.okPeriods.length > 0 && (
-                              <div className="flex gap-1 flex-wrap justify-end">
-                                  {item.okPeriods.map(p => <span key={`ok-${p}`} className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-md">〇 {formatPeriod(p)}</span>)}
-                              </div>
-                            )}
-                            {item.trianglePeriods.length > 0 && (
-                              <div className="flex gap-1 flex-wrap justify-end mt-1">
-                                  {item.trianglePeriods.map(p => <span key={`tri-${p}`} className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md">△ {formatPeriod(p)}</span>)}
-                              </div>
-                            )}
-                        </div>
+                      )}
                     </div>
-                ))}
+                  );
+                })}
+              </div>
             </div>
-        );
+          ))}
+        </div>
+      );
+    };
+
+    // 【追加】メンバー一覧タブの表示
+    const renderMemberList = () => {
+      return (
+        <div className="p-4 space-y-3">
+          <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
+            <span className="font-bold text-gray-800">メンバー一覧 ({groupMembers.length}人)</span>
+          </div>
+          {groupMembers.map(m => (
+            <div key={m.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4">
+              <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl shadow-inner shrink-0">
+                {m.displayName.substring(0, 1)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-2">
+                  <h4 className="font-bold text-gray-900 truncate">{m.displayName}</h4>
+                  <span className="text-[10px] text-gray-400">@{m.username}</span>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">{m.year}</div>
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {m.parts && m.parts.map(part => (
+                    <span key={part} className="bg-gray-100 text-gray-600 text-[10px] px-1.5 py-0.5 rounded-md font-medium">{part}</span>
+                  ))}
+                  {(!m.parts || m.parts.length === 0) && <span className="text-[10px] text-gray-400">パート未設定</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
     };
 
     return (
       <div className="flex flex-col h-full bg-gray-50">
-        <div className="bg-white p-4 border-b flex items-center gap-3 sticky top-0 z-10">
+        <div className="bg-white p-4 border-b flex items-center gap-3 sticky top-0 z-10 shadow-sm">
           <button onClick={() => setActiveGroup(null)} className="p-2 -ml-2 bg-gray-50 rounded-full hover:bg-gray-100"><ChevronLeft size={20} className="text-gray-700" /></button>
           <div>
             <h2 className="text-xl font-bold text-gray-900">{activeGroup.name}</h2>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs text-gray-500">メンバー {groupMembers.length}人</span>
-              <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">参加コード: <strong className="font-mono tracking-widest">{activeGroup.joinCode}</strong></span>
+              <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">コード: <strong className="font-mono tracking-widest">{activeGroup.joinCode}</strong></span>
             </div>
           </div>
         </div>
-        <div className="flex p-2 bg-gray-100 m-4 rounded-xl">
-            <button onClick={() => setGroupViewTab('calendar')} className={`flex-1 py-1.5 text-sm font-medium rounded-lg ${groupViewTab === 'calendar' ? 'bg-white shadow text-indigo-600' : 'text-gray-500'}`}>カレンダー</button>
-            <button onClick={() => setGroupViewTab('list')} className={`flex-1 py-1.5 text-sm font-medium rounded-lg ${groupViewTab === 'list' ? 'bg-white shadow text-emerald-600' : 'text-gray-500'}`}>空いている日一覧</button>
+
+        {/* タブ切り替えメニュー（3つに増えました） */}
+        <div className="flex p-2 bg-gray-100 mx-4 mt-4 rounded-xl overflow-x-auto hide-scrollbar gap-1">
+            <button onClick={() => setGroupViewTab('calendar')} className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${groupViewTab === 'calendar' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>カレンダー</button>
+            <button onClick={() => setGroupViewTab('list')} className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${groupViewTab === 'list' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}>空き日一覧</button>
+            <button onClick={() => setGroupViewTab('members')} className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${groupViewTab === 'members' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>メンバー</button>
         </div>
-        {groupViewTab === 'calendar' ? (
-            <>{renderGroupCalendar()}{renderGroupDayDetail()}</>
-        ) : renderAvailableList()}
+
+        {groupViewTab === 'calendar' && <>{renderGroupCalendar()}{renderGroupDayDetail()}</>}
+        {groupViewTab === 'list' && renderAvailableList()}
+        {groupViewTab === 'members' && renderMemberList()}
       </div>
     );
   }
