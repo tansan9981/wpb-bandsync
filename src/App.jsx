@@ -34,9 +34,7 @@ const generateJoinCode = () => Math.random().toString(36).substring(2, 8).toUppe
 // スケジュールの枠（限）を定義（昼休みを追加）
 const getPeriodListForDate = (date) => {
   const day = date.getDay();
-  // 基本は1, 2, 昼休み, 3, 4
   const base = ['1', '2', 'lunch', '3', '4'];
-  // 平日は5, 6限を追加
   if (day !== 0 && day !== 6) base.push('5', '6');
   return base;
 };
@@ -201,7 +199,6 @@ function MyScheduleView({ user }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [mySchedules, setMySchedules] = useState([]);
   
-  // 入力モードの追加 (x:行けない, triangle:微妙, ok:臨時OK)
   const [inputStatus, setInputStatus] = useState('x'); 
 
   useEffect(() => {
@@ -214,53 +211,105 @@ function MyScheduleView({ user }) {
     fetchSchedules();
   }, [user]);
 
-  // 【変更】過去の日付には繰り返しルールを適用しない（startDateを利用）
   const getScheduleRule = (date, period) => {
     const rules = mySchedules.filter(r => r.period === period);
     const dStr = date.toISOString().split('T')[0];
     
-    // 1. その日固有の設定 (once) があれば最優先
     const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
     if (onceRule) return { ...onceRule, status: onceRule.status || 'x', isOverride: true };
     
-    // 2. なければベースの設定 (weekly -> monthly -> daily)
-    // ただし、設定開始日（startDate）以前の日付には適用しない
-    const weeklyRule = rules.find(r => r.type === 'weekly' && r.dayOfWeek === date.getDay() && (!r.startDate || r.startDate <= dStr));
+    const isValidRule = (r) => {
+      if (r.startDate && r.startDate > dStr) return false;
+      if (r.endDate && r.endDate <= dStr) return false;
+      return true;
+    };
+
+    const findValidRule = (type, condition) => {
+       const validRules = rules.filter(r => r.type === type && condition(r) && isValidRule(r));
+       if (validRules.length === 0) return null;
+       validRules.sort((a, b) => {
+         const sa = a.startDate || '1970-01-01';
+         const sb = b.startDate || '1970-01-01';
+         return sa < sb ? 1 : (sa > sb ? -1 : 0);
+       });
+       return validRules[0];
+    };
+
+    const weeklyRule = findValidRule('weekly', r => r.dayOfWeek === date.getDay());
     if (weeklyRule) return { ...weeklyRule, status: weeklyRule.status || 'x', isOverride: false };
     
-    const monthlyRule = rules.find(r => r.type === 'monthly' && r.dayOfMonth === date.getDate() && (!r.startDate || r.startDate <= dStr));
+    const monthlyRule = findValidRule('monthly', r => r.dayOfMonth === date.getDate());
     if (monthlyRule) return { ...monthlyRule, status: monthlyRule.status || 'x', isOverride: false };
     
-    const dailyRule = rules.find(r => r.type === 'daily' && (!r.startDate || r.startDate <= dStr));
+    const dailyRule = findValidRule('daily', r => true);
     if (dailyRule) return { ...dailyRule, status: dailyRule.status || 'x', isOverride: false };
     
     return null;
   };
 
-  // 個別の枠のトグル
   const toggleSchedule = async (date, period, type, newStatus) => {
     const dStr = date.toISOString().split('T')[0];
+    const rulesOfSameType = mySchedules.filter(r => r.period === period && r.type === type);
     
-    const existingIdx = mySchedules.findIndex(r => 
-      r.period === period && r.type === type && 
-      ((type === 'once' && r.date === dStr) || type === 'daily' || (type === 'weekly' && r.dayOfWeek === date.getDay()) || (type === 'monthly' && r.dayOfMonth === date.getDate()))
-    );
+    let activeRule = null;
+    if (type === 'once') {
+        activeRule = rulesOfSameType.find(r => r.date === dStr);
+    } else {
+        const condition = type === 'weekly' ? (r => r.dayOfWeek === date.getDay()) :
+                          type === 'monthly' ? (r => r.dayOfMonth === date.getDate()) :
+                          (r => true);
+        const validRules = rulesOfSameType.filter(r => condition(r) && (!r.startDate || r.startDate <= dStr) && (!r.endDate || r.endDate > dStr));
+        if (validRules.length > 0) {
+            validRules.sort((a, b) => {
+              const sa = a.startDate || '1970-01-01';
+              const sb = b.startDate || '1970-01-01';
+              return sa < sb ? 1 : (sa > sb ? -1 : 0);
+            });
+            activeRule = validRules[0];
+        }
+    }
 
     try {
       let newSchedules = [...mySchedules];
-      if (existingIdx >= 0) {
-        const rule = mySchedules[existingIdx];
-        if (rule.status === newStatus || (!rule.status && newStatus === 'x')) {
-          // 全く同じ状態なら「解除（削除）」
-          await deleteDoc(doc(db, "schedules", rule.id));
-          newSchedules.splice(existingIdx, 1);
+      
+      if (activeRule) {
+        const currentStatus = activeRule.status || 'x';
+        
+        if (currentStatus === newStatus || (!activeRule.status && newStatus === 'x')) {
+            // ----- 解除操作 -----
+            if (type === 'once' || !activeRule.startDate || activeRule.startDate === dStr) {
+                // once または 今日設定したばかりなら完全削除
+                await deleteDoc(doc(db, "schedules", activeRule.id));
+                newSchedules = newSchedules.filter(r => r.id !== activeRule.id);
+            } else {
+                // 過去に設定したものは endDate を設定して無効化（過去は残る）
+                await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
+                const idx = newSchedules.findIndex(r => r.id === activeRule.id);
+                if(idx >= 0) newSchedules[idx].endDate = dStr;
+            }
         } else {
-          // 違う状態なら「上書き」
-          await updateDoc(doc(db, "schedules", rule.id), { status: newStatus });
-          newSchedules[existingIdx].status = newStatus;
+            // ----- 変更（上書き）操作 -----
+            if (type === 'once' || !activeRule.startDate || activeRule.startDate === dStr) {
+                // once または 今日設定したばかりならステータスを直接上書き
+                await updateDoc(doc(db, "schedules", activeRule.id), { status: newStatus });
+                const idx = newSchedules.findIndex(r => r.id === activeRule.id);
+                if(idx >= 0) newSchedules[idx].status = newStatus;
+            } else {
+                // 過去の設定なら古いものを終了させ、新しい設定を追加（過去は残る）
+                await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
+                const idx = newSchedules.findIndex(r => r.id === activeRule.id);
+                if(idx >= 0) newSchedules[idx].endDate = dStr;
+                
+                let newRule = { userId: user.id, period, type, status: newStatus, startDate: dStr };
+                if (type === 'weekly') newRule.dayOfWeek = date.getDay();
+                if (type === 'monthly') newRule.dayOfMonth = date.getDate();
+                
+                const docRef = await addDoc(collection(db, "schedules"), newRule);
+                newSchedules.push({ id: docRef.id, ...newRule });
+            }
         }
       } else {
-        // 新規作成時、そのルールが「いつから適用されるか(startDate)」も記録する
+        // ----- 新規追加 -----
         let newRule = { userId: user.id, period, type, status: newStatus, startDate: dStr };
         if (type === 'once') newRule.date = dStr;
         if (type === 'weekly') newRule.dayOfWeek = date.getDay();
@@ -273,55 +322,88 @@ function MyScheduleView({ user }) {
     } catch(e) { alert("更新エラー: Firebaseの設定を確認してください"); }
   };
 
-  // 全日（一括）設定のトグル処理
   const handleSetAllDay = async (type) => {
     const periods = getPeriodListForDate(selectedDate);
     const dStr = selectedDate.toISOString().split('T')[0];
     let updatedSchedules = [...mySchedules];
     
+    const getActiveRuleForType = (period, targetType) => {
+        const rulesOfSameType = updatedSchedules.filter(r => r.period === period && r.type === targetType);
+        if (targetType === 'once') {
+            return rulesOfSameType.find(r => r.date === dStr);
+        } else {
+            const condition = targetType === 'weekly' ? (r => r.dayOfWeek === selectedDate.getDay()) :
+                              targetType === 'monthly' ? (r => r.dayOfMonth === selectedDate.getDate()) :
+                              (r => true);
+            const validRules = rulesOfSameType.filter(r => condition(r) && (!r.startDate || r.startDate <= dStr) && (!r.endDate || r.endDate > dStr));
+            if (validRules.length > 0) {
+                validRules.sort((a, b) => {
+                  const sa = a.startDate || '1970-01-01';
+                  const sb = b.startDate || '1970-01-01';
+                  return sa < sb ? 1 : (sa > sb ? -1 : 0);
+                });
+                return validRules[0];
+            }
+            return null;
+        }
+    };
+
     const isAllSet = periods.every(period => {
-      return updatedSchedules.some(r => 
-        r.period === period && r.type === type && (r.status === inputStatus || (!r.status && inputStatus === 'x')) &&
-        ((type === 'once' && r.date === dStr) || type === 'daily' || (type === 'weekly' && r.dayOfWeek === selectedDate.getDay()) || (type === 'monthly' && r.dayOfMonth === selectedDate.getDate()))
-      );
+      const rule = getActiveRuleForType(period, type);
+      return rule && (rule.status === inputStatus || (!rule.status && inputStatus === 'x'));
     });
     
     try {
       for (const period of periods) {
-        const existingIdx = updatedSchedules.findIndex(r => 
-          r.period === period && r.type === type && 
-          ((type === 'once' && r.date === dStr) || type === 'daily' || (type === 'weekly' && r.dayOfWeek === selectedDate.getDay()) || (type === 'monthly' && r.dayOfMonth === selectedDate.getDate()))
-        );
+        const activeRule = getActiveRuleForType(period, type);
 
         if (isAllSet) {
-          if (existingIdx >= 0) {
-            const rule = updatedSchedules[existingIdx];
-            await deleteDoc(doc(db, "schedules", rule.id));
-            updatedSchedules.splice(existingIdx, 1);
+          // ----- 全て解除 -----
+          if (activeRule) {
+             if (type === 'once' || !activeRule.startDate || activeRule.startDate === dStr) {
+                await deleteDoc(doc(db, "schedules", activeRule.id));
+                updatedSchedules = updatedSchedules.filter(r => r.id !== activeRule.id);
+             } else {
+                await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
+                const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
+                if(idx >= 0) updatedSchedules[idx].endDate = dStr;
+             }
           }
         } else {
-          if (existingIdx >= 0) {
-            const rule = updatedSchedules[existingIdx];
-            if (rule.status !== inputStatus && !(rule.status === undefined && inputStatus === 'x')) {
-              await updateDoc(doc(db, "schedules", rule.id), { status: inputStatus });
-              updatedSchedules[existingIdx] = { ...rule, status: inputStatus };
-            }
+          // ----- 全て設定 (変更・上書き・新規) -----
+          if (activeRule) {
+             const currentStatus = activeRule.status || 'x';
+             if (currentStatus !== inputStatus) {
+                 if (type === 'once' || !activeRule.startDate || activeRule.startDate === dStr) {
+                     await updateDoc(doc(db, "schedules", activeRule.id), { status: inputStatus });
+                     const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
+                     if(idx >= 0) updatedSchedules[idx].status = inputStatus;
+                 } else {
+                     await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
+                     const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
+                     if(idx >= 0) updatedSchedules[idx].endDate = dStr;
+                     
+                     let newRule = { userId: user.id, period, type, status: inputStatus, startDate: dStr };
+                     if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
+                     if (type === 'monthly') newRule.dayOfMonth = selectedDate.getDate();
+                     
+                     const docRef = await addDoc(collection(db, "schedules"), newRule);
+                     updatedSchedules.push({ id: docRef.id, ...newRule });
+                 }
+             }
           } else {
-            // 一括作成時も startDate を記録
-            let newRule = { userId: user.id, period, type, status: inputStatus, startDate: dStr };
-            if (type === 'once') newRule.date = dStr;
-            if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
-            if (type === 'monthly') newRule.dayOfMonth = selectedDate.getDate();
-            
-            const docRef = await addDoc(collection(db, "schedules"), newRule);
-            updatedSchedules.push({ id: docRef.id, ...newRule });
+             let newRule = { userId: user.id, period, type, status: inputStatus, startDate: dStr };
+             if (type === 'once') newRule.date = dStr;
+             if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
+             if (type === 'monthly') newRule.dayOfMonth = selectedDate.getDate();
+             
+             const docRef = await addDoc(collection(db, "schedules"), newRule);
+             updatedSchedules.push({ id: docRef.id, ...newRule });
           }
         }
       }
       setMySchedules(updatedSchedules);
-    } catch (e) {
-      alert("一括更新に失敗しました");
-    }
+    } catch (e) { alert("一括更新に失敗しました"); }
   };
 
   const renderCalendar = () => {
@@ -412,10 +494,25 @@ function MyScheduleView({ user }) {
               const isDisabled = inputStatus === 'ok' && type !== 'once';
               
               const isAllSetForThisType = periods.every(period => {
-                return mySchedules.some(r => 
-                  r.period === period && r.type === type && (r.status === inputStatus || (!r.status && inputStatus === 'x')) &&
-                  ((type === 'once' && r.date === dStr) || type === 'daily' || (type === 'weekly' && r.dayOfWeek === selectedDate.getDay()) || (type === 'monthly' && r.dayOfMonth === selectedDate.getDate()))
-                );
+                const rulesOfSameType = mySchedules.filter(r => r.period === period && r.type === type);
+                let validRule = null;
+                if (type === 'once') {
+                    validRule = rulesOfSameType.find(r => r.date === dStr);
+                } else {
+                    const condition = type === 'weekly' ? (r => r.dayOfWeek === selectedDate.getDay()) :
+                                      type === 'monthly' ? (r => r.dayOfMonth === selectedDate.getDate()) :
+                                      (r => true);
+                    const validRules = rulesOfSameType.filter(r => condition(r) && (!r.startDate || r.startDate <= dStr) && (!r.endDate || r.endDate > dStr));
+                    if (validRules.length > 0) {
+                        validRules.sort((a, b) => {
+                          const sa = a.startDate || '1970-01-01';
+                          const sb = b.startDate || '1970-01-01';
+                          return sa < sb ? 1 : (sa > sb ? -1 : 0);
+                        });
+                        validRule = validRules[0];
+                    }
+                }
+                return validRule && (validRule.status === inputStatus || (!validRule.status && inputStatus === 'x'));
               });
 
               return (
@@ -565,7 +662,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     } catch(e) { alert("参加エラー"); }
   };
 
-  // 【変更】グループでの予定評価時も startDate を考慮する
   const getUserScheduleRule = (userId, date, period) => {
     const rules = allSchedules.filter(r => r.userId === userId && r.period === period);
     const dStr = date.toISOString().split('T')[0];
@@ -573,13 +669,30 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
     if (onceRule) return { ...onceRule, status: onceRule.status || 'x' };
     
-    const weeklyRule = rules.find(r => r.type === 'weekly' && r.dayOfWeek === date.getDay() && (!r.startDate || r.startDate <= dStr));
+    const isValidRule = (r) => {
+      if (r.startDate && r.startDate > dStr) return false;
+      if (r.endDate && r.endDate <= dStr) return false;
+      return true;
+    };
+
+    const findValidRule = (type, condition) => {
+       const validRules = rules.filter(r => r.type === type && condition(r) && isValidRule(r));
+       if (validRules.length === 0) return null;
+       validRules.sort((a, b) => {
+         const sa = a.startDate || '1970-01-01';
+         const sb = b.startDate || '1970-01-01';
+         return sa < sb ? 1 : (sa > sb ? -1 : 0);
+       });
+       return validRules[0];
+    };
+
+    const weeklyRule = findValidRule('weekly', r => r.dayOfWeek === date.getDay());
     if (weeklyRule) return { ...weeklyRule, status: weeklyRule.status || 'x' };
     
-    const monthlyRule = rules.find(r => r.type === 'monthly' && r.dayOfMonth === date.getDate() && (!r.startDate || r.startDate <= dStr));
+    const monthlyRule = findValidRule('monthly', r => r.dayOfMonth === date.getDate());
     if (monthlyRule) return { ...monthlyRule, status: monthlyRule.status || 'x' };
     
-    const dailyRule = rules.find(r => r.type === 'daily' && (!r.startDate || r.startDate <= dStr));
+    const dailyRule = findValidRule('daily', r => true);
     if (dailyRule) return { ...dailyRule, status: dailyRule.status || 'x' };
     
     return null;
@@ -598,13 +711,8 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       groupMembers.forEach(m => {
         const rule = getUserScheduleRule(m.id, date, p);
         if (rule) {
-          if (rule.status === 'ok') {
-            // ok(臨時行ける)は空きとして扱うためスルー
-          } else if (rule.status === 'triangle') {
-            triangleMembers.push(m);
-          } else {
-            xMembers.push(m);
-          }
+          if (rule.status === 'triangle') triangleMembers.push(m);
+          else if (rule.status !== 'ok') xMembers.push(m);
         }
       });
       detail.push({ period: p, xMembers, triangleMembers });
@@ -729,20 +837,21 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             const rule = getUserScheduleRule(m.id, d, p);
             if (rule) {
               if (rule.status === 'triangle') triangleMembers.push(m);
-              else if (rule.status !== 'ok') xMembers.push(m);
+              else if (rule.status !== 'ok') xMembers.push(m); // 'x' もしくは設定あり
             }
           });
 
           const xCount = xMembers.length;
           const triCount = triangleMembers.length;
 
+          // 全員NGの枠は非表示
           if (xCount === totalMembers) continue; 
 
           let category = 0;
-          if (xCount === 0 && triCount === 0) category = 1;
-          else if (xCount === 0 && triCount > 0) category = 2;
-          else if (xCount > 0 && triCount === 0) category = 3;
-          else if (xCount > 0 && triCount > 0) category = 4;
+          if (xCount === 0 && triCount === 0) category = 1;      // ①全員〇
+          else if (xCount === 0 && triCount > 0) category = 2;   // ②全員OKだが△あり
+          else if (xCount > 0 && triCount === 0) category = 3;   // ③一部NG、残りは全員〇
+          else if (xCount > 0 && triCount > 0) category = 4;     // ④一部NG、残りに△あり
 
           dayPeriods.push({ period: p, category, xMembers, triangleMembers });
         }
