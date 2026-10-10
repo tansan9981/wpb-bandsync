@@ -201,7 +201,6 @@ function MyScheduleView({ user }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [mySchedules, setMySchedules] = useState([]);
   
-  // 入力モードの追加 (x:行けない, triangle:微妙, ok:臨時OK)
   const [inputStatus, setInputStatus] = useState('x'); 
 
   useEffect(() => {
@@ -219,24 +218,29 @@ function MyScheduleView({ user }) {
     const rules = mySchedules.filter(r => r.period === period);
     const dStr = date.toISOString().split('T')[0];
     
+    // 【重要】優先順位の評価
+    // 1. その日固有の設定 (once) があればそれを最優先
     const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
-    if (onceRule) return { ...onceRule, status: onceRule.status || 'x' };
+    if (onceRule) return { ...onceRule, status: onceRule.status || 'x', isOverride: true };
     
+    // 2. なければベースの設定 (weekly -> monthly -> daily)
     const weeklyRule = rules.find(r => r.type === 'weekly' && r.dayOfWeek === date.getDay());
-    if (weeklyRule) return { ...weeklyRule, status: weeklyRule.status || 'x' };
+    if (weeklyRule) return { ...weeklyRule, status: weeklyRule.status || 'x', isOverride: false };
     
     const monthlyRule = rules.find(r => r.type === 'monthly' && r.dayOfMonth === date.getDate());
-    if (monthlyRule) return { ...monthlyRule, status: monthlyRule.status || 'x' };
+    if (monthlyRule) return { ...monthlyRule, status: monthlyRule.status || 'x', isOverride: false };
     
     const dailyRule = rules.find(r => r.type === 'daily');
-    if (dailyRule) return { ...dailyRule, status: dailyRule.status || 'x' };
+    if (dailyRule) return { ...dailyRule, status: dailyRule.status || 'x', isOverride: false };
     
     return null;
   };
 
-  // 個別の枠のトグル（同じ設定なら削除、違うなら上書き）
+  // 個別の枠のトグル
   const toggleSchedule = async (date, period, type, newStatus) => {
     const dStr = date.toISOString().split('T')[0];
+    
+    // 操作しようとしているタイプ(type)のルールが存在するか探す
     const existingIdx = mySchedules.findIndex(r => 
       r.period === period && r.type === type && 
       ((type === 'once' && r.date === dStr) || type === 'daily' || (type === 'weekly' && r.dayOfWeek === date.getDay()) || (type === 'monthly' && r.dayOfMonth === date.getDate()))
@@ -245,15 +249,19 @@ function MyScheduleView({ user }) {
     try {
       let newSchedules = [...mySchedules];
       if (existingIdx >= 0) {
+        // すでにそのタイプ(onceなど)のルールが存在する場合
         const rule = mySchedules[existingIdx];
         if (rule.status === newStatus || (!rule.status && newStatus === 'x')) {
+          // 全く同じ状態なら「解除（削除）」する
           await deleteDoc(doc(db, "schedules", rule.id));
           newSchedules.splice(existingIdx, 1);
         } else {
+          // 違う状態（x -> triangle等）なら「上書き」する
           await updateDoc(doc(db, "schedules", rule.id), { status: newStatus });
           newSchedules[existingIdx].status = newStatus;
         }
       } else {
+        // 存在しない場合は「新規作成」
         let newRule = { userId: user.id, period, type, status: newStatus };
         if (type === 'once') newRule.date = dStr;
         if (type === 'weekly') newRule.dayOfWeek = date.getDay();
@@ -266,11 +274,19 @@ function MyScheduleView({ user }) {
     } catch(e) { alert("更新エラー: Firebaseの設定を確認してください"); }
   };
 
-  // 【追加】全日（一括）設定の処理
+  // 全日（一括）設定のトグル処理
   const handleSetAllDay = async (type) => {
     const periods = getPeriodListForDate(selectedDate);
     const dStr = selectedDate.toISOString().split('T')[0];
     let updatedSchedules = [...mySchedules];
+    
+    // 現在のモード(inputStatus)で、その日の全ての限がすでに設定されているかをチェック
+    const isAllSet = periods.every(period => {
+      return updatedSchedules.some(r => 
+        r.period === period && r.type === type && (r.status === inputStatus || (!r.status && inputStatus === 'x')) &&
+        ((type === 'once' && r.date === dStr) || type === 'daily' || (type === 'weekly' && r.dayOfWeek === selectedDate.getDay()) || (type === 'monthly' && r.dayOfMonth === selectedDate.getDate()))
+      );
+    });
     
     try {
       for (const period of periods) {
@@ -279,20 +295,31 @@ function MyScheduleView({ user }) {
           ((type === 'once' && r.date === dStr) || type === 'daily' || (type === 'weekly' && r.dayOfWeek === selectedDate.getDay()) || (type === 'monthly' && r.dayOfMonth === selectedDate.getDate()))
         );
 
-        if (existingIdx >= 0) {
-          const rule = updatedSchedules[existingIdx];
-          if (rule.status !== inputStatus) {
-            await updateDoc(doc(db, "schedules", rule.id), { status: inputStatus });
-            updatedSchedules[existingIdx] = { ...rule, status: inputStatus };
+        if (isAllSet) {
+          // 全て設定済みなら、全部解除（削除）する
+          if (existingIdx >= 0) {
+            const rule = updatedSchedules[existingIdx];
+            await deleteDoc(doc(db, "schedules", rule.id));
+            updatedSchedules.splice(existingIdx, 1);
           }
         } else {
-          let newRule = { userId: user.id, period, type, status: inputStatus };
-          if (type === 'once') newRule.date = dStr;
-          if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
-          if (type === 'monthly') newRule.dayOfMonth = selectedDate.getDate();
-          
-          const docRef = await addDoc(collection(db, "schedules"), newRule);
-          updatedSchedules.push({ id: docRef.id, ...newRule });
+          // そうでなければ、全部現在のモード(inputStatus)にする
+          if (existingIdx >= 0) {
+            const rule = updatedSchedules[existingIdx];
+            // 違うステータスなら上書き
+            if (rule.status !== inputStatus && !(rule.status === undefined && inputStatus === 'x')) {
+              await updateDoc(doc(db, "schedules", rule.id), { status: inputStatus });
+              updatedSchedules[existingIdx] = { ...rule, status: inputStatus };
+            }
+          } else {
+            let newRule = { userId: user.id, period, type, status: inputStatus };
+            if (type === 'once') newRule.date = dStr;
+            if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
+            if (type === 'monthly') newRule.dayOfMonth = selectedDate.getDate();
+            
+            const docRef = await addDoc(collection(db, "schedules"), newRule);
+            updatedSchedules.push({ id: docRef.id, ...newRule });
+          }
         }
       }
       setMySchedules(updatedSchedules);
@@ -356,6 +383,8 @@ function MyScheduleView({ user }) {
   const renderDayDetail = () => {
     if (!selectedDate) return null;
     const periods = getPeriodListForDate(selectedDate);
+    const dStr = selectedDate.toISOString().split('T')[0];
+
     return (
       <div className="p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-4 animate-in slide-in-from-bottom-4">
         <div className="flex justify-between items-center mb-4">
@@ -371,10 +400,10 @@ function MyScheduleView({ user }) {
         </div>
         <p className="text-[10px] text-gray-500 mb-4 bg-gray-50 p-2 rounded-lg leading-relaxed">
           上のボタンでモードを選択後、下の枠をタップしてください。<br/>
-          <span className="text-blue-600 font-bold">「〇 臨時OK」</span>は、繰り返しの予定を特定の週だけ「行ける」に上書きする時に使います。
+          <span className="text-blue-600 font-bold">「〇 臨時OK」</span>は、<span className="font-bold underline">「この日」のみ選択可能</span>です。繰り返しの予定を特定の週だけ上書きする時に使います。
         </p>
 
-        {/* 【追加】全日一括設定ボタン */}
+        {/* 全日一括設定ボタン群 */}
         <div className="mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
           <div className="text-xs font-bold text-indigo-800 mb-2 flex items-center justify-between">
             <span>この日を一括で設定（全日）</span>
@@ -385,11 +414,28 @@ function MyScheduleView({ user }) {
           <div className="flex gap-1">
             {['once:この日', 'weekly:毎週', 'monthly:毎月', 'daily:毎日'].map(t => {
               const [type, label] = t.split(':');
+              
+              // 「臨時OK(ok)」モードの時は「この日(once)」以外はグレーアウトして押せなくする
+              const isDisabled = inputStatus === 'ok' && type !== 'once';
+              
+              const isAllSetForThisType = periods.every(period => {
+                return mySchedules.some(r => 
+                  r.period === period && r.type === type && (r.status === inputStatus || (!r.status && inputStatus === 'x')) &&
+                  ((type === 'once' && r.date === dStr) || type === 'daily' || (type === 'weekly' && r.dayOfWeek === selectedDate.getDay()) || (type === 'monthly' && r.dayOfMonth === selectedDate.getDate()))
+                );
+              });
+
               return (
                 <button 
                   key={`all-${type}`} 
                   onClick={() => handleSetAllDay(type)}
-                  className="flex-1 py-2 text-[10px] font-bold rounded-lg bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition-colors"
+                  disabled={isDisabled}
+                  className={`flex-1 py-2 text-[10px] font-bold rounded-lg transition-colors border ${
+                    isDisabled ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-50' :
+                    isAllSetForThisType 
+                      ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm' 
+                      : 'bg-white border-indigo-200 text-indigo-700 hover:bg-indigo-50'
+                  }`}
                 >
                   {label}
                 </button>
@@ -402,40 +448,64 @@ function MyScheduleView({ user }) {
           {periods.map(period => {
             const rule = getScheduleRule(selectedDate, period);
             const isActive = !!rule;
+            // その枠に適用されている「最も優先順位の高いルールのタイプ」と「ステータス」
             const activeType = rule ? rule.type : null;
             const activeStatus = rule ? (rule.status || 'x') : null;
-            
-            const btnColor = (type) => {
-              if (isActive && activeType === type) {
-                if (activeStatus === 'x') return 'bg-red-500 text-white shadow-sm';
-                if (activeStatus === 'triangle') return 'bg-amber-500 text-white shadow-sm';
-                if (activeStatus === 'ok') return 'bg-blue-500 text-white shadow-sm';
-              }
-              if (isActive) return 'bg-gray-100 text-gray-400 opacity-50';
-              return 'bg-gray-100 text-gray-600 hover:bg-gray-200';
-            };
-
-            const periodBadgeColor = () => {
-              if (!isActive) return 'bg-gray-100 text-gray-700';
-              if (activeStatus === 'x') return 'bg-red-100 text-red-700';
-              if (activeStatus === 'triangle') return 'bg-amber-100 text-amber-700';
-              return 'bg-blue-100 text-blue-700';
-            };
+            // そのルールが「この日(once)」による上書きかどうか
+            const isOverride = rule ? rule.isOverride : false;
 
             return (
               <div key={period} className="flex items-center gap-2">
-                <div className={`w-14 text-center font-bold py-2 rounded-xl text-xs ${periodBadgeColor()}`}>
-                  {formatPeriod(period)}
+                <div className={`w-14 text-center font-bold py-2 rounded-xl text-xs flex flex-col items-center justify-center
+                  ${!isActive ? 'bg-gray-100 text-gray-700' : 
+                    activeStatus === 'x' ? 'bg-red-100 text-red-700' : 
+                    activeStatus === 'triangle' ? 'bg-amber-100 text-amber-700' : 
+                    'bg-blue-100 text-blue-700'}`
+                }>
+                  <span>{formatPeriod(period)}</span>
+                  {/* 何のルールが適用されているかの小さなヒントを表示 */}
+                  {isActive && <span className="text-[8px] font-normal opacity-80 -mt-0.5">{activeType === 'once' ? 'この日' : activeType === 'weekly' ? '毎週' : activeType === 'monthly' ? '毎月' : '毎日'}</span>}
                 </div>
+
                 <div className="flex-1 grid grid-cols-4 gap-1">
                   {['once:この日', 'weekly:毎週', 'monthly:毎月', 'daily:毎日'].map(t => {
                     const [type, label] = t.split(':');
+                    
+                    // 「臨時OK(ok)」モードの時は「この日(once)」以外はグレーアウト
+                    const isDisabledByMode = inputStatus === 'ok' && type !== 'once';
+
+                    // ボタン自体のタイプ(type)と、現在その枠に設定されている「そのタイプの実データ」を探す
+                    const thisTypeRule = mySchedules.find(r => 
+                      r.period === period && r.type === type && 
+                      ((type === 'once' && r.date === dStr) || type === 'daily' || (type === 'weekly' && r.dayOfWeek === selectedDate.getDay()) || (type === 'monthly' && r.dayOfMonth === selectedDate.getDate()))
+                    );
+
+                    // そのボタンのタイプの設定が存在しているか
+                    const hasThisTypeSetting = !!thisTypeRule;
+                    // そのボタンのタイプのステータス
+                    const thisTypeStatus = thisTypeRule ? (thisTypeRule.status || 'x') : null;
+
+                    const btnColor = () => {
+                      if (isDisabledByMode) return 'bg-gray-100 text-gray-400 opacity-50 cursor-not-allowed';
+                      
+                      if (hasThisTypeSetting) {
+                        if (thisTypeStatus === 'x') return 'bg-red-500 text-white shadow-sm ring-2 ring-red-200';
+                        if (thisTypeStatus === 'triangle') return 'bg-amber-500 text-white shadow-sm ring-2 ring-amber-200';
+                        if (thisTypeStatus === 'ok') return 'bg-blue-500 text-white shadow-sm ring-2 ring-blue-200';
+                      }
+                      
+                      // 自分が選ばれていないが、他のルールによってこの枠がブロック(NG等)されている場合
+                      if (isActive && !hasThisTypeSetting) return 'bg-gray-100 text-gray-400 opacity-60';
+                      
+                      return 'bg-gray-100 text-gray-600 hover:bg-gray-200';
+                    };
+
                     return (
                       <button 
                         key={type} 
                         onClick={() => toggleSchedule(selectedDate, period, type, inputStatus)} 
-                        disabled={isActive && activeType !== type} 
-                        className={`py-2 text-[10px] font-medium rounded-xl ${btnColor(type)}`}
+                        disabled={isDisabledByMode} 
+                        className={`py-2 text-[10px] font-medium rounded-xl transition-all ${btnColor()}`}
                       >
                         {label}
                       </button>
