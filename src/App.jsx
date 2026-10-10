@@ -201,6 +201,7 @@ function MyScheduleView({ user }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [mySchedules, setMySchedules] = useState([]);
   
+  // 入力モードの追加 (x:行けない, triangle:微妙, ok:臨時OK)
   const [inputStatus, setInputStatus] = useState('x'); 
 
   useEffect(() => {
@@ -213,24 +214,24 @@ function MyScheduleView({ user }) {
     fetchSchedules();
   }, [user]);
 
-  // 優先順位（once > weekly > monthly > daily）でスケジュールを取得
+  // 【変更】過去の日付には繰り返しルールを適用しない（startDateを利用）
   const getScheduleRule = (date, period) => {
     const rules = mySchedules.filter(r => r.period === period);
     const dStr = date.toISOString().split('T')[0];
     
-    // 【重要】優先順位の評価
-    // 1. その日固有の設定 (once) があればそれを最優先
+    // 1. その日固有の設定 (once) があれば最優先
     const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
     if (onceRule) return { ...onceRule, status: onceRule.status || 'x', isOverride: true };
     
     // 2. なければベースの設定 (weekly -> monthly -> daily)
-    const weeklyRule = rules.find(r => r.type === 'weekly' && r.dayOfWeek === date.getDay());
+    // ただし、設定開始日（startDate）以前の日付には適用しない
+    const weeklyRule = rules.find(r => r.type === 'weekly' && r.dayOfWeek === date.getDay() && (!r.startDate || r.startDate <= dStr));
     if (weeklyRule) return { ...weeklyRule, status: weeklyRule.status || 'x', isOverride: false };
     
-    const monthlyRule = rules.find(r => r.type === 'monthly' && r.dayOfMonth === date.getDate());
+    const monthlyRule = rules.find(r => r.type === 'monthly' && r.dayOfMonth === date.getDate() && (!r.startDate || r.startDate <= dStr));
     if (monthlyRule) return { ...monthlyRule, status: monthlyRule.status || 'x', isOverride: false };
     
-    const dailyRule = rules.find(r => r.type === 'daily');
+    const dailyRule = rules.find(r => r.type === 'daily' && (!r.startDate || r.startDate <= dStr));
     if (dailyRule) return { ...dailyRule, status: dailyRule.status || 'x', isOverride: false };
     
     return null;
@@ -240,7 +241,6 @@ function MyScheduleView({ user }) {
   const toggleSchedule = async (date, period, type, newStatus) => {
     const dStr = date.toISOString().split('T')[0];
     
-    // 操作しようとしているタイプ(type)のルールが存在するか探す
     const existingIdx = mySchedules.findIndex(r => 
       r.period === period && r.type === type && 
       ((type === 'once' && r.date === dStr) || type === 'daily' || (type === 'weekly' && r.dayOfWeek === date.getDay()) || (type === 'monthly' && r.dayOfMonth === date.getDate()))
@@ -249,20 +249,19 @@ function MyScheduleView({ user }) {
     try {
       let newSchedules = [...mySchedules];
       if (existingIdx >= 0) {
-        // すでにそのタイプ(onceなど)のルールが存在する場合
         const rule = mySchedules[existingIdx];
         if (rule.status === newStatus || (!rule.status && newStatus === 'x')) {
-          // 全く同じ状態なら「解除（削除）」する
+          // 全く同じ状態なら「解除（削除）」
           await deleteDoc(doc(db, "schedules", rule.id));
           newSchedules.splice(existingIdx, 1);
         } else {
-          // 違う状態（x -> triangle等）なら「上書き」する
+          // 違う状態なら「上書き」
           await updateDoc(doc(db, "schedules", rule.id), { status: newStatus });
           newSchedules[existingIdx].status = newStatus;
         }
       } else {
-        // 存在しない場合は「新規作成」
-        let newRule = { userId: user.id, period, type, status: newStatus };
+        // 新規作成時、そのルールが「いつから適用されるか(startDate)」も記録する
+        let newRule = { userId: user.id, period, type, status: newStatus, startDate: dStr };
         if (type === 'once') newRule.date = dStr;
         if (type === 'weekly') newRule.dayOfWeek = date.getDay();
         if (type === 'monthly') newRule.dayOfMonth = date.getDate();
@@ -280,7 +279,6 @@ function MyScheduleView({ user }) {
     const dStr = selectedDate.toISOString().split('T')[0];
     let updatedSchedules = [...mySchedules];
     
-    // 現在のモード(inputStatus)で、その日の全ての限がすでに設定されているかをチェック
     const isAllSet = periods.every(period => {
       return updatedSchedules.some(r => 
         r.period === period && r.type === type && (r.status === inputStatus || (!r.status && inputStatus === 'x')) &&
@@ -296,23 +294,21 @@ function MyScheduleView({ user }) {
         );
 
         if (isAllSet) {
-          // 全て設定済みなら、全部解除（削除）する
           if (existingIdx >= 0) {
             const rule = updatedSchedules[existingIdx];
             await deleteDoc(doc(db, "schedules", rule.id));
             updatedSchedules.splice(existingIdx, 1);
           }
         } else {
-          // そうでなければ、全部現在のモード(inputStatus)にする
           if (existingIdx >= 0) {
             const rule = updatedSchedules[existingIdx];
-            // 違うステータスなら上書き
             if (rule.status !== inputStatus && !(rule.status === undefined && inputStatus === 'x')) {
               await updateDoc(doc(db, "schedules", rule.id), { status: inputStatus });
               updatedSchedules[existingIdx] = { ...rule, status: inputStatus };
             }
           } else {
-            let newRule = { userId: user.id, period, type, status: inputStatus };
+            // 一括作成時も startDate を記録
+            let newRule = { userId: user.id, period, type, status: inputStatus, startDate: dStr };
             if (type === 'once') newRule.date = dStr;
             if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
             if (type === 'monthly') newRule.dayOfMonth = selectedDate.getDate();
@@ -392,7 +388,6 @@ function MyScheduleView({ user }) {
           <button onClick={() => setSelectedDate(null)} className="p-1 bg-gray-100 rounded-full hover:bg-gray-200"><X size={16}/></button>
         </div>
         
-        {/* 入力モードの切り替え */}
         <div className="flex gap-1 mb-2 bg-gray-100 p-1 rounded-xl">
           <button onClick={() => setInputStatus('x')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${inputStatus === 'x' ? 'bg-red-500 text-white shadow' : 'text-gray-500 hover:bg-gray-200'}`}>× 行けない</button>
           <button onClick={() => setInputStatus('triangle')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${inputStatus === 'triangle' ? 'bg-amber-500 text-white shadow' : 'text-gray-500 hover:bg-gray-200'}`}>△ 微妙</button>
@@ -403,7 +398,6 @@ function MyScheduleView({ user }) {
           <span className="text-blue-600 font-bold">「〇 臨時OK」</span>は、<span className="font-bold underline">「この日」のみ選択可能</span>です。繰り返しの予定を特定の週だけ上書きする時に使います。
         </p>
 
-        {/* 全日一括設定ボタン群 */}
         <div className="mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
           <div className="text-xs font-bold text-indigo-800 mb-2 flex items-center justify-between">
             <span>この日を一括で設定（全日）</span>
@@ -415,7 +409,6 @@ function MyScheduleView({ user }) {
             {['once:この日', 'weekly:毎週', 'monthly:毎月', 'daily:毎日'].map(t => {
               const [type, label] = t.split(':');
               
-              // 「臨時OK(ok)」モードの時は「この日(once)」以外はグレーアウトして押せなくする
               const isDisabled = inputStatus === 'ok' && type !== 'once';
               
               const isAllSetForThisType = periods.every(period => {
@@ -448,22 +441,30 @@ function MyScheduleView({ user }) {
           {periods.map(period => {
             const rule = getScheduleRule(selectedDate, period);
             const isActive = !!rule;
-            // その枠に適用されている「最も優先順位の高いルールのタイプ」と「ステータス」
             const activeType = rule ? rule.type : null;
             const activeStatus = rule ? (rule.status || 'x') : null;
-            // そのルールが「この日(once)」による上書きかどうか
-            const isOverride = rule ? rule.isOverride : false;
+            
+            const btnColor = (type) => {
+              if (isActive && activeType === type) {
+                if (activeStatus === 'x') return 'bg-red-500 text-white shadow-sm ring-2 ring-red-200';
+                if (activeStatus === 'triangle') return 'bg-amber-500 text-white shadow-sm ring-2 ring-amber-200';
+                if (activeStatus === 'ok') return 'bg-blue-500 text-white shadow-sm ring-2 ring-blue-200';
+              }
+              if (isActive) return 'bg-gray-100 text-gray-400 opacity-50';
+              return 'bg-gray-100 text-gray-600 hover:bg-gray-200';
+            };
+
+            const periodBadgeColor = () => {
+              if (!isActive) return 'bg-gray-100 text-gray-700';
+              if (activeStatus === 'x') return 'bg-red-100 text-red-700';
+              if (activeStatus === 'triangle') return 'bg-amber-100 text-amber-700';
+              return 'bg-blue-100 text-blue-700';
+            };
 
             return (
               <div key={period} className="flex items-center gap-2">
-                <div className={`w-14 text-center font-bold py-2 rounded-xl text-xs flex flex-col items-center justify-center
-                  ${!isActive ? 'bg-gray-100 text-gray-700' : 
-                    activeStatus === 'x' ? 'bg-red-100 text-red-700' : 
-                    activeStatus === 'triangle' ? 'bg-amber-100 text-amber-700' : 
-                    'bg-blue-100 text-blue-700'}`
-                }>
+                <div className={`w-14 text-center font-bold py-2 rounded-xl text-xs flex flex-col items-center justify-center ${periodBadgeColor()}`}>
                   <span>{formatPeriod(period)}</span>
-                  {/* 何のルールが適用されているかの小さなヒントを表示 */}
                   {isActive && <span className="text-[8px] font-normal opacity-80 -mt-0.5">{activeType === 'once' ? 'この日' : activeType === 'weekly' ? '毎週' : activeType === 'monthly' ? '毎月' : '毎日'}</span>}
                 </div>
 
@@ -471,41 +472,14 @@ function MyScheduleView({ user }) {
                   {['once:この日', 'weekly:毎週', 'monthly:毎月', 'daily:毎日'].map(t => {
                     const [type, label] = t.split(':');
                     
-                    // 「臨時OK(ok)」モードの時は「この日(once)」以外はグレーアウト
                     const isDisabledByMode = inputStatus === 'ok' && type !== 'once';
-
-                    // ボタン自体のタイプ(type)と、現在その枠に設定されている「そのタイプの実データ」を探す
-                    const thisTypeRule = mySchedules.find(r => 
-                      r.period === period && r.type === type && 
-                      ((type === 'once' && r.date === dStr) || type === 'daily' || (type === 'weekly' && r.dayOfWeek === selectedDate.getDay()) || (type === 'monthly' && r.dayOfMonth === selectedDate.getDate()))
-                    );
-
-                    // そのボタンのタイプの設定が存在しているか
-                    const hasThisTypeSetting = !!thisTypeRule;
-                    // そのボタンのタイプのステータス
-                    const thisTypeStatus = thisTypeRule ? (thisTypeRule.status || 'x') : null;
-
-                    const btnColor = () => {
-                      if (isDisabledByMode) return 'bg-gray-100 text-gray-400 opacity-50 cursor-not-allowed';
-                      
-                      if (hasThisTypeSetting) {
-                        if (thisTypeStatus === 'x') return 'bg-red-500 text-white shadow-sm ring-2 ring-red-200';
-                        if (thisTypeStatus === 'triangle') return 'bg-amber-500 text-white shadow-sm ring-2 ring-amber-200';
-                        if (thisTypeStatus === 'ok') return 'bg-blue-500 text-white shadow-sm ring-2 ring-blue-200';
-                      }
-                      
-                      // 自分が選ばれていないが、他のルールによってこの枠がブロック(NG等)されている場合
-                      if (isActive && !hasThisTypeSetting) return 'bg-gray-100 text-gray-400 opacity-60';
-                      
-                      return 'bg-gray-100 text-gray-600 hover:bg-gray-200';
-                    };
 
                     return (
                       <button 
                         key={type} 
                         onClick={() => toggleSchedule(selectedDate, period, type, inputStatus)} 
                         disabled={isDisabledByMode} 
-                        className={`py-2 text-[10px] font-medium rounded-xl transition-all ${btnColor()}`}
+                        className={`py-2 text-[10px] font-medium rounded-xl transition-all ${btnColor(type)}`}
                       >
                         {label}
                       </button>
@@ -591,17 +565,23 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     } catch(e) { alert("参加エラー"); }
   };
 
+  // 【変更】グループでの予定評価時も startDate を考慮する
   const getUserScheduleRule = (userId, date, period) => {
     const rules = allSchedules.filter(r => r.userId === userId && r.period === period);
     const dStr = date.toISOString().split('T')[0];
+    
     const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
     if (onceRule) return { ...onceRule, status: onceRule.status || 'x' };
-    const weeklyRule = rules.find(r => r.type === 'weekly' && r.dayOfWeek === date.getDay());
+    
+    const weeklyRule = rules.find(r => r.type === 'weekly' && r.dayOfWeek === date.getDay() && (!r.startDate || r.startDate <= dStr));
     if (weeklyRule) return { ...weeklyRule, status: weeklyRule.status || 'x' };
-    const monthlyRule = rules.find(r => r.type === 'monthly' && r.dayOfMonth === date.getDate());
+    
+    const monthlyRule = rules.find(r => r.type === 'monthly' && r.dayOfMonth === date.getDate() && (!r.startDate || r.startDate <= dStr));
     if (monthlyRule) return { ...monthlyRule, status: monthlyRule.status || 'x' };
-    const dailyRule = rules.find(r => r.type === 'daily');
+    
+    const dailyRule = rules.find(r => r.type === 'daily' && (!r.startDate || r.startDate <= dStr));
     if (dailyRule) return { ...dailyRule, status: dailyRule.status || 'x' };
+    
     return null;
   };
 
@@ -749,21 +729,20 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             const rule = getUserScheduleRule(m.id, d, p);
             if (rule) {
               if (rule.status === 'triangle') triangleMembers.push(m);
-              else if (rule.status !== 'ok') xMembers.push(m); // 'x' もしくは設定あり
+              else if (rule.status !== 'ok') xMembers.push(m);
             }
           });
 
           const xCount = xMembers.length;
           const triCount = triangleMembers.length;
 
-          // 全員NGの枠は非表示
           if (xCount === totalMembers) continue; 
 
           let category = 0;
-          if (xCount === 0 && triCount === 0) category = 1;      // ①全員〇
-          else if (xCount === 0 && triCount > 0) category = 2;   // ②全員OKだが△あり
-          else if (xCount > 0 && triCount === 0) category = 3;   // ③一部NG、残りは全員〇
-          else if (xCount > 0 && triCount > 0) category = 4;     // ④一部NG、残りに△あり
+          if (xCount === 0 && triCount === 0) category = 1;
+          else if (xCount === 0 && triCount > 0) category = 2;
+          else if (xCount > 0 && triCount === 0) category = 3;
+          else if (xCount > 0 && triCount > 0) category = 4;
 
           dayPeriods.push({ period: p, category, xMembers, triangleMembers });
         }
