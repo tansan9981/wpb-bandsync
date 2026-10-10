@@ -201,6 +201,7 @@ function MyScheduleView({ user }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [mySchedules, setMySchedules] = useState([]);
   
+  // 入力モードの追加 (x:行けない, triangle:微妙, ok:臨時OK)
   const [inputStatus, setInputStatus] = useState('x'); 
 
   useEffect(() => {
@@ -213,20 +214,27 @@ function MyScheduleView({ user }) {
     fetchSchedules();
   }, [user]);
 
+  // 優先順位（once > weekly > monthly > daily）でスケジュールを取得
   const getScheduleRule = (date, period) => {
     const rules = mySchedules.filter(r => r.period === period);
     const dStr = date.toISOString().split('T')[0];
+    
     const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
     if (onceRule) return { ...onceRule, status: onceRule.status || 'x' };
+    
     const weeklyRule = rules.find(r => r.type === 'weekly' && r.dayOfWeek === date.getDay());
     if (weeklyRule) return { ...weeklyRule, status: weeklyRule.status || 'x' };
+    
     const monthlyRule = rules.find(r => r.type === 'monthly' && r.dayOfMonth === date.getDate());
     if (monthlyRule) return { ...monthlyRule, status: monthlyRule.status || 'x' };
+    
     const dailyRule = rules.find(r => r.type === 'daily');
     if (dailyRule) return { ...dailyRule, status: dailyRule.status || 'x' };
+    
     return null;
   };
 
+  // 個別の枠のトグル（同じ設定なら削除、違うなら上書き）
   const toggleSchedule = async (date, period, type, newStatus) => {
     const dStr = date.toISOString().split('T')[0];
     const existingIdx = mySchedules.findIndex(r => 
@@ -258,6 +266,41 @@ function MyScheduleView({ user }) {
     } catch(e) { alert("更新エラー: Firebaseの設定を確認してください"); }
   };
 
+  // 【追加】全日（一括）設定の処理
+  const handleSetAllDay = async (type) => {
+    const periods = getPeriodListForDate(selectedDate);
+    const dStr = selectedDate.toISOString().split('T')[0];
+    let updatedSchedules = [...mySchedules];
+    
+    try {
+      for (const period of periods) {
+        const existingIdx = updatedSchedules.findIndex(r => 
+          r.period === period && r.type === type && 
+          ((type === 'once' && r.date === dStr) || type === 'daily' || (type === 'weekly' && r.dayOfWeek === selectedDate.getDay()) || (type === 'monthly' && r.dayOfMonth === selectedDate.getDate()))
+        );
+
+        if (existingIdx >= 0) {
+          const rule = updatedSchedules[existingIdx];
+          if (rule.status !== inputStatus) {
+            await updateDoc(doc(db, "schedules", rule.id), { status: inputStatus });
+            updatedSchedules[existingIdx] = { ...rule, status: inputStatus };
+          }
+        } else {
+          let newRule = { userId: user.id, period, type, status: inputStatus };
+          if (type === 'once') newRule.date = dStr;
+          if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
+          if (type === 'monthly') newRule.dayOfMonth = selectedDate.getDate();
+          
+          const docRef = await addDoc(collection(db, "schedules"), newRule);
+          updatedSchedules.push({ id: docRef.id, ...newRule });
+        }
+      }
+      setMySchedules(updatedSchedules);
+    } catch (e) {
+      alert("一括更新に失敗しました");
+    }
+  };
+
   const renderCalendar = () => {
     const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
     const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getDay();
@@ -273,8 +316,13 @@ function MyScheduleView({ user }) {
       periods.forEach(p => {
         const rule = getScheduleRule(d, p);
         if (rule) {
-          if (rule.status === 'triangle') hasTriangle = true;
-          else hasX = true;
+          if (rule.status === 'ok') {
+            // ok(臨時行ける) の場合は表示上のマークは付けない
+          } else if (rule.status === 'triangle') {
+            hasTriangle = true;
+          } else {
+            hasX = true;
+          }
         }
       });
       
@@ -309,19 +357,48 @@ function MyScheduleView({ user }) {
     if (!selectedDate) return null;
     const periods = getPeriodListForDate(selectedDate);
     return (
-      <div className="p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-4">
+      <div className="p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-4 animate-in slide-in-from-bottom-4">
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-bold">{selectedDate.getMonth() + 1}/{selectedDate.getDate()} の予定</h3>
-          <button onClick={() => setSelectedDate(null)} className="p-1 bg-gray-100 rounded-full"><X size={16}/></button>
+          <h3 className="text-lg font-bold text-gray-800">{selectedDate.getMonth() + 1}/{selectedDate.getDate()} の予定</h3>
+          <button onClick={() => setSelectedDate(null)} className="p-1 bg-gray-100 rounded-full hover:bg-gray-200"><X size={16}/></button>
         </div>
         
-        <div className="flex gap-2 mb-4 bg-gray-100 p-1 rounded-xl">
-          <button onClick={() => setInputStatus('x')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${inputStatus === 'x' ? 'bg-red-500 text-white shadow' : 'text-gray-500'}`}>× 行けない</button>
-          <button onClick={() => setInputStatus('triangle')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${inputStatus === 'triangle' ? 'bg-amber-500 text-white shadow' : 'text-gray-500'}`}>△ 微妙</button>
+        {/* 入力モードの切り替え */}
+        <div className="flex gap-1 mb-2 bg-gray-100 p-1 rounded-xl">
+          <button onClick={() => setInputStatus('x')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${inputStatus === 'x' ? 'bg-red-500 text-white shadow' : 'text-gray-500 hover:bg-gray-200'}`}>× 行けない</button>
+          <button onClick={() => setInputStatus('triangle')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${inputStatus === 'triangle' ? 'bg-amber-500 text-white shadow' : 'text-gray-500 hover:bg-gray-200'}`}>△ 微妙</button>
+          <button onClick={() => setInputStatus('ok')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${inputStatus === 'ok' ? 'bg-blue-500 text-white shadow' : 'text-gray-500 hover:bg-gray-200'}`}>〇 臨時OK</button>
         </div>
-        <p className="text-xs text-gray-500 mb-4 bg-gray-50 p-2 rounded-lg">上のボタンで「×」か「△」を選んでから、下の枠をタップしてください。</p>
+        <p className="text-[10px] text-gray-500 mb-4 bg-gray-50 p-2 rounded-lg leading-relaxed">
+          上のボタンでモードを選択後、下の枠をタップしてください。<br/>
+          <span className="text-blue-600 font-bold">「〇 臨時OK」</span>は、繰り返しの予定を特定の週だけ「行ける」に上書きする時に使います。
+        </p>
 
-        <div className="space-y-3">
+        {/* 【追加】全日一括設定ボタン */}
+        <div className="mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+          <div className="text-xs font-bold text-indigo-800 mb-2 flex items-center justify-between">
+            <span>この日を一括で設定（全日）</span>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full text-white ${inputStatus === 'x' ? 'bg-red-500' : inputStatus === 'triangle' ? 'bg-amber-500' : 'bg-blue-500'}`}>
+              選択中: {inputStatus === 'x' ? '×' : inputStatus === 'triangle' ? '△' : '〇'}
+            </span>
+          </div>
+          <div className="flex gap-1">
+            {['once:この日', 'weekly:毎週', 'monthly:毎月', 'daily:毎日'].map(t => {
+              const [type, label] = t.split(':');
+              return (
+                <button 
+                  key={`all-${type}`} 
+                  onClick={() => handleSetAllDay(type)}
+                  className="flex-1 py-2 text-[10px] font-bold rounded-lg bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition-colors"
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="space-y-3 border-t border-gray-100 pt-3">
           {periods.map(period => {
             const rule = getScheduleRule(selectedDate, period);
             const isActive = !!rule;
@@ -330,15 +407,24 @@ function MyScheduleView({ user }) {
             
             const btnColor = (type) => {
               if (isActive && activeType === type) {
-                return activeStatus === 'x' ? 'bg-red-500 text-white' : 'bg-amber-500 text-white';
+                if (activeStatus === 'x') return 'bg-red-500 text-white shadow-sm';
+                if (activeStatus === 'triangle') return 'bg-amber-500 text-white shadow-sm';
+                if (activeStatus === 'ok') return 'bg-blue-500 text-white shadow-sm';
               }
               if (isActive) return 'bg-gray-100 text-gray-400 opacity-50';
               return 'bg-gray-100 text-gray-600 hover:bg-gray-200';
             };
 
+            const periodBadgeColor = () => {
+              if (!isActive) return 'bg-gray-100 text-gray-700';
+              if (activeStatus === 'x') return 'bg-red-100 text-red-700';
+              if (activeStatus === 'triangle') return 'bg-amber-100 text-amber-700';
+              return 'bg-blue-100 text-blue-700';
+            };
+
             return (
               <div key={period} className="flex items-center gap-2">
-                <div className={`w-14 text-center font-bold py-2 rounded-xl text-xs ${isActive ? (activeStatus==='x'?'bg-red-100 text-red-700':'bg-amber-100 text-amber-700') : 'bg-gray-100 text-gray-700'}`}>
+                <div className={`w-14 text-center font-bold py-2 rounded-xl text-xs ${periodBadgeColor()}`}>
                   {formatPeriod(period)}
                 </div>
                 <div className="flex-1 grid grid-cols-4 gap-1">
@@ -462,8 +548,13 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       groupMembers.forEach(m => {
         const rule = getUserScheduleRule(m.id, date, p);
         if (rule) {
-          if (rule.status === 'triangle') triangleMembers.push(m);
-          else xMembers.push(m);
+          if (rule.status === 'ok') {
+            // ok(臨時行ける)は空きとして扱うためスルー
+          } else if (rule.status === 'triangle') {
+            triangleMembers.push(m);
+          } else {
+            xMembers.push(m);
+          }
         }
       });
       detail.push({ period: p, xMembers, triangleMembers });
@@ -569,7 +660,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       );
     };
 
-    // 【大幅変更】4つのカテゴリに対応した空き日一覧の生成
     const renderAvailableList = () => {
       const today = new Date();
       const list = [];
@@ -589,14 +679,14 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             const rule = getUserScheduleRule(m.id, d, p);
             if (rule) {
               if (rule.status === 'triangle') triangleMembers.push(m);
-              else xMembers.push(m);
+              else if (rule.status !== 'ok') xMembers.push(m); // 'x' もしくは設定あり
             }
           });
 
           const xCount = xMembers.length;
           const triCount = triangleMembers.length;
 
-          // 全員NGの枠は非表示（除外）
+          // 全員NGの枠は非表示
           if (xCount === totalMembers) continue; 
 
           let category = 0;
@@ -672,7 +762,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       );
     };
 
-    // 【追加】メンバー一覧タブの表示
     const renderMemberList = () => {
       return (
         <div className="p-4 space-y-3">
@@ -716,7 +805,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           </div>
         </div>
 
-        {/* タブ切り替えメニュー（3つに増えました） */}
         <div className="flex p-2 bg-gray-100 mx-4 mt-4 rounded-xl overflow-x-auto hide-scrollbar gap-1">
             <button onClick={() => setGroupViewTab('calendar')} className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${groupViewTab === 'calendar' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>カレンダー</button>
             <button onClick={() => setGroupViewTab('list')} className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${groupViewTab === 'list' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}>空き日一覧</button>
