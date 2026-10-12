@@ -40,7 +40,6 @@ const getPeriodListForDate = (date) => {
 
 const formatPeriod = (p) => p === 'lunch' ? '昼休み' : `${p}限`;
 
-// 【重要修正】日本時間(JST)で正確な日付文字列(YYYY-MM-DD)を取得する関数
 const getLocalYMD = (date) => {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -58,6 +57,25 @@ export default function App() {
 
   const [activeGroup, setActiveGroup] = useState(null);
 
+  // 【追加】アプリ起動時に「1ヶ月有効なログインキー」が残っているかチェックする
+  useEffect(() => {
+    const storedAuth = localStorage.getItem('wpb_bandsync_auth');
+    if (storedAuth) {
+      try {
+        const { userData, expiresAt } = JSON.parse(storedAuth);
+        // 現在の時間が、有効期限（30日後）より前なら自動ログイン
+        if (new Date().getTime() < expiresAt) {
+          setUser(userData);
+        } else {
+          // 期限切れならキーを捨てる
+          localStorage.removeItem('wpb_bandsync_auth');
+        }
+      } catch (e) {
+        localStorage.removeItem('wpb_bandsync_auth');
+      }
+    }
+  }, []);
+
   const handleAuth = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -69,7 +87,13 @@ export default function App() {
         const querySnapshot = await getDocs(q);
         if (!querySnapshot.empty) {
           const userData = querySnapshot.docs[0].data();
-          setUser({ id: querySnapshot.docs[0].id, ...userData });
+          const loggedInUser = { id: querySnapshot.docs[0].id, ...userData };
+          setUser(loggedInUser);
+
+          // 【追加】ログイン成功時に、30日間の有効期限付きでキーを保存する
+          const expiresAt = new Date().getTime() + 30 * 24 * 60 * 60 * 1000;
+          localStorage.setItem('wpb_bandsync_auth', JSON.stringify({ userData: loggedInUser, expiresAt }));
+
         } else {
           setAuthError('ユーザー名またはパスワードが間違っています。');
         }
@@ -89,14 +113,24 @@ export default function App() {
         if(!querySnapshot.empty) { setAuthError('このユーザー名は既に使用されています。'); return; }
         
         const docRef = await addDoc(collection(db, "users"), newUser);
-        setUser({ id: docRef.id, ...newUser });
+        const loggedInUser = { id: docRef.id, ...newUser };
+        setUser(loggedInUser);
+
+        // 【追加】新規登録成功時にも、30日間の有効期限付きでキーを保存する
+        const expiresAt = new Date().getTime() + 30 * 24 * 60 * 60 * 1000;
+        localStorage.setItem('wpb_bandsync_auth', JSON.stringify({ userData: loggedInUser, expiresAt }));
+
       } catch (err) { setAuthError('登録エラー: ' + err.message); }
     }
   };
 
   const handleLogout = () => {
-    setUser(null); setActiveTab('mySchedule'); setActiveGroup(null);
+    setUser(null); 
+    setActiveTab('mySchedule'); 
+    setActiveGroup(null);
     setAuthForm({ username: '', password: '', confirmPassword: '', displayName: '', year: '2026年度', parts: [] });
+    // 【追加】ログアウト時は保存していた鍵を破棄する
+    localStorage.removeItem('wpb_bandsync_auth');
   };
 
   const togglePart = (part) => {
@@ -204,7 +238,6 @@ function MyScheduleView({ user }) {
   const [mySchedules, setMySchedules] = useState([]);
   
   const [inputStatus, setInputStatus] = useState('x'); 
-  // 【追加】連打や処理被りを防ぐロック状態
   const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
@@ -254,7 +287,7 @@ function MyScheduleView({ user }) {
   };
 
   const toggleSchedule = async (date, period, type, newStatus) => {
-    if (isProcessing) return; // 処理中はブロック
+    if (isProcessing) return;
     setIsProcessing(true);
     
     const dStr = getLocalYMD(date);
@@ -286,7 +319,6 @@ function MyScheduleView({ user }) {
         const safeStartDate = activeRule.startDate || '2000-01-01';
         
         if (currentStatus === newStatus || (!activeRule.status && newStatus === 'x')) {
-            // 解除
             if (type === 'once' || safeStartDate === dStr) {
                 await deleteDoc(doc(db, "schedules", activeRule.id));
                 newSchedules = newSchedules.filter(r => r.id !== activeRule.id);
@@ -296,7 +328,6 @@ function MyScheduleView({ user }) {
                 if(idx >= 0) newSchedules[idx] = { ...newSchedules[idx], endDate: dStr };
             }
         } else {
-            // 変更（上書き）
             if (type === 'once' || safeStartDate === dStr) {
                 await updateDoc(doc(db, "schedules", activeRule.id), { status: newStatus });
                 const idx = newSchedules.findIndex(r => r.id === activeRule.id);
@@ -315,7 +346,6 @@ function MyScheduleView({ user }) {
             }
         }
       } else {
-        // 新規作成
         let newRule = { userId: user.id, period, type, status: newStatus, startDate: dStr };
         if (type === 'once') newRule.date = dStr;
         if (type === 'weekly') newRule.dayOfWeek = date.getDay();
@@ -333,7 +363,7 @@ function MyScheduleView({ user }) {
   };
 
   const handleSetAllDay = async (type) => {
-    if (isProcessing) return; // 処理中はブロック
+    if (isProcessing) return;
     setIsProcessing(true);
 
     const periods = getPeriodListForDate(selectedDate);
@@ -373,7 +403,6 @@ function MyScheduleView({ user }) {
         const activeRule = getActiveRuleForType(period, type);
 
         if (isAllSet) {
-          // 全て解除
           if (activeRule) {
              const safeStartDate = activeRule.startDate || '2000-01-01';
              if (type === 'once' || safeStartDate === dStr) {
@@ -386,7 +415,6 @@ function MyScheduleView({ user }) {
              }
           }
         } else {
-          // 全て設定 (変更・上書き・新規)
           if (activeRule) {
              const currentStatus = activeRule.status || 'x';
              const safeStartDate = activeRule.startDate || '2000-01-01';
@@ -492,7 +520,6 @@ function MyScheduleView({ user }) {
     const dStr = getLocalYMD(selectedDate);
 
     return (
-      // 処理中は半透明にしてクリック不可にする
       <div className={`p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-4 animate-in slide-in-from-bottom-4 transition-opacity ${isProcessing ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-bold text-gray-800">{selectedDate.getMonth() + 1}/{selectedDate.getDate()} の予定</h3>
@@ -632,7 +659,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   
   const [groupMembers, setGroupMembers] = useState([]);
   const [allSchedules, setAllSchedules] = useState([]);
-  const [groupViewTab, setGroupViewTab] = useState('calendar');
+  const [groupViewTab, setGroupViewTab] = useState('calendar'); // 'calendar' | 'list' | 'members'
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
 
