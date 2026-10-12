@@ -50,7 +50,7 @@ const getLocalYMD = (date) => {
 // --- Tutorial Component ---
 function TutorialModal({ onClose }) {
   const [step, setStep] = useState(1);
-  const totalSteps = 4;
+  const totalSteps = 6; // ステップ数を6に増加
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
@@ -69,8 +69,9 @@ function TutorialModal({ onClose }) {
                 <CalendarIcon size={32} />
               </div>
               <h3 className="text-xl font-bold text-gray-900">ようこそ！<br/>WPB BandSyncへ</h3>
-              <p className="text-sm text-gray-600 leading-relaxed">
-                このアプリは、バンドメンバー同士のスケジュール調整を劇的に簡単にするアプリです。
+              <p className="text-sm text-gray-600 leading-relaxed text-left">
+                このアプリは、バンドやサークルメンバー同士の<strong>「スケジュール調整」を劇的に簡単にする</strong>ために作られた専用アプリです。<br/><br/>
+                使い方の基本を順番にご説明します。
               </p>
             </div>
           )}
@@ -82,33 +83,60 @@ function TutorialModal({ onClose }) {
               </div>
               <h3 className="text-lg font-bold text-gray-900">1. マイ予定を入力しよう</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                「マイ予定」タブからカレンダーの日付をタップし、<strong className="text-red-500">行けない時間（×）</strong>や<strong className="text-amber-500">微妙な時間（△）</strong>を登録します。<br/><br/>
-                「毎週」や「毎月」など、繰り返しの設定も一括で簡単にできます！
+                「マイ予定」タブからカレンダーの日付をタップします。<br/><br/>
+                画面に表示されるボタンから<strong className="text-red-500">行けない（×）</strong>や<strong className="text-amber-500">微妙（△）</strong>のモードを選び、該当する時限（1限など）のボタンをタップするだけで登録完了です！
               </p>
             </div>
           )}
 
           {step === 3 && (
             <div className="text-center space-y-4">
-              <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-2">
-                <Users size={32} />
+              <div className="flex justify-center gap-2 mb-2">
+                <div className="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-bold">毎週</div>
+                <div className="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-bold">全日一括</div>
               </div>
-              <h3 className="text-lg font-bold text-gray-900">2. グループに参加しよう</h3>
+              <h3 className="text-lg font-bold text-gray-900">2. 繰り返しと一括設定</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                「グループ」タブから、自分が所属するバンドのグループを作成するか、リーダーから教わった<strong>6桁の参加コード</strong>を入力してグループに参加します。
+                「この日」だけでなく、<strong>「毎週」「毎月」</strong>のボタンを押せば、先の予定まで一気に登録できます。<br/><br/>
+                また、<strong>「この日を一括で設定（全日）」</strong>のボタンを使えば、1日丸ごとの予定を1タップで入力・解除できてとても便利です！
               </p>
             </div>
           )}
 
           {step === 4 && (
             <div className="text-center space-y-4">
+              <div className="w-16 h-16 bg-blue-100 text-blue-500 rounded-2xl flex items-center justify-center mx-auto mb-2">
+                <span className="text-3xl font-bold">〇</span>
+              </div>
+              <h3 className="text-lg font-bold text-gray-900">3. 「臨時OK」の裏ワザ</h3>
+              <p className="text-sm text-gray-600 leading-relaxed text-left">
+                「普段は毎週火曜日NGにしているけど、<strong>来週の火曜は祝日だから特別に行ける！</strong>」<br/><br/>
+                そんな時は、モードを<strong className="text-blue-500">「〇 臨時OK」</strong>にして該当の日をタップしてください。普段の「毎週×」の予定を崩さずに、その日だけ「行ける」に上書きできます。
+              </p>
+            </div>
+          )}
+
+          {step === 5 && (
+            <div className="text-center space-y-4">
+              <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-2">
+                <Users size={32} />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900">4. グループに参加しよう</h3>
+              <p className="text-sm text-gray-600 leading-relaxed text-left">
+                「グループ」タブから、自分が所属するバンドのグループを<strong>「新規作成」</strong>するか、リーダーから教わった<strong>「6桁の参加コード」</strong>を入力してグループに参加します。
+              </p>
+            </div>
+          )}
+
+          {step === 6 && (
+            <div className="text-center space-y-4">
               <div className="w-16 h-16 bg-emerald-100 text-emerald-500 rounded-2xl flex items-center justify-center mx-auto mb-2">
                 <Check size={32} strokeWidth={3} />
               </div>
-              <h3 className="text-lg font-bold text-gray-900">3. 空いている日が一目で！</h3>
+              <h3 className="text-lg font-bold text-gray-900">5. 空き日が一目でわかる！</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                グループ画面の「空き日一覧」を見ると、<strong>メンバー全員が揃う日（◎）</strong>や、<strong>一部欠席でも集まれる日（△）</strong>が自動でリストアップされます。<br/><br/>
-                これで練習日決めはバッチリです！
+                グループ画面の「空き日一覧」タブを見ると、メンバーの予定を自動で計算してリストアップします。<br/><br/>
+                <strong>「◎ 全員参加」</strong>の日や、<strong>「△ 一部NG（誰がいないか）」</strong>がひと目で分かるので、練習日決めが圧倒的にスムーズになります！
               </p>
             </div>
           )}
@@ -148,7 +176,6 @@ export default function App() {
 
   const [activeGroup, setActiveGroup] = useState(null);
   
-  // 【追加】チュートリアルの表示状態を管理するstate
   const [showTutorial, setShowTutorial] = useState(false);
 
   useEffect(() => {
@@ -184,7 +211,6 @@ export default function App() {
           const expiresAt = new Date().getTime() + 30 * 24 * 60 * 60 * 1000;
           localStorage.setItem('wpb_bandsync_auth', JSON.stringify({ userData: loggedInUser, expiresAt }));
 
-          // 【追加】このデバイスでチュートリアルを見たことがなければ表示する
           if (!localStorage.getItem('wpb_tutorial_seen')) {
              setShowTutorial(true);
           }
@@ -214,7 +240,6 @@ export default function App() {
         const expiresAt = new Date().getTime() + 30 * 24 * 60 * 60 * 1000;
         localStorage.setItem('wpb_bandsync_auth', JSON.stringify({ userData: loggedInUser, expiresAt }));
         
-        // 【追加】新規登録時は無条件でチュートリアルを表示する
         setShowTutorial(true);
 
       } catch (err) { setAuthError('登録エラー: ' + err.message); }
@@ -233,10 +258,8 @@ export default function App() {
     setAuthForm(prev => ({ ...prev, parts: prev.parts.includes(part) ? prev.parts.filter(p => p !== part) : [...prev.parts, part] }));
   };
 
-  // 【追加】チュートリアルを閉じるときの処理
   const handleCloseTutorial = () => {
     setShowTutorial(false);
-    // チュートリアルを見たという記録を残す
     localStorage.setItem('wpb_tutorial_seen', 'true');
   };
 
@@ -320,7 +343,6 @@ export default function App() {
       <main className="flex-1 w-full max-w-md mx-auto overflow-y-auto pb-20 relative">
         {activeTab === 'mySchedule' && <MyScheduleView user={user} />}
         {activeTab === 'groups' && <GroupsView user={user} activeGroup={activeGroup} setActiveGroup={setActiveGroup} />}
-        {/* ProfileView に setShowTutorial を渡す */}
         {activeTab === 'profile' && <ProfileView user={user} setShowTutorial={setShowTutorial} handleLogout={handleLogout} />}
         {activeTab === 'admin' && user.username === 'Boss' && <AdminView />}
       </main>
@@ -334,7 +356,6 @@ export default function App() {
         </div>
       </nav>
 
-      {/* 【追加】チュートリアルモーダルの表示 */}
       {showTutorial && <TutorialModal onClose={handleCloseTutorial} />}
     </div>
   );
@@ -1212,7 +1233,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 }
 
 // --- ProfileView ---
-// 【変更】PropsにsetShowTutorialとhandleLogoutを受け取るように追加
 function ProfileView({ user, setShowTutorial, handleLogout }) {
   return (
     <div className="p-4 space-y-4">
@@ -1233,7 +1253,6 @@ function ProfileView({ user, setShowTutorial, handleLogout }) {
             <span className="font-medium text-sm">アカウント設定</span>
          </div>
          
-         {/* 【追加】チュートリアルをもう一度見るボタン */}
          <div 
            className="p-4 border-b border-gray-50 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors"
            onClick={() => setShowTutorial(true)}
@@ -1245,7 +1264,6 @@ function ProfileView({ user, setShowTutorial, handleLogout }) {
             <ChevronRight size={16} className="text-gray-400" />
          </div>
 
-         {/* 【変更】ログアウトボタン */}
          <div 
            className="p-4 flex items-center justify-between bg-red-50 cursor-pointer hover:bg-red-100 transition-colors"
            onClick={handleLogout}
