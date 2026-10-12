@@ -6,7 +6,7 @@ import {
 } from "firebase/firestore";
 import { 
   Calendar as CalendarIcon, Users, User, Settings, Check, 
-  X, ChevronLeft, ChevronRight, Shield, LogOut, Trash2, KeyRound
+  X, ChevronLeft, ChevronRight, Shield, LogOut, Trash2, KeyRound, Info, BookOpen
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -47,6 +47,97 @@ const getLocalYMD = (date) => {
   return `${y}-${m}-${d}`;
 };
 
+// --- Tutorial Component ---
+function TutorialModal({ onClose }) {
+  const [step, setStep] = useState(1);
+  const totalSteps = 4;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="h-2 bg-gray-100 w-full">
+          <div 
+            className="h-full bg-indigo-500 transition-all duration-300 ease-out" 
+            style={{ width: `${(step / totalSteps) * 100}%` }}
+          />
+        </div>
+        
+        <div className="p-6">
+          {step === 1 && (
+            <div className="text-center space-y-4">
+              <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-2">
+                <CalendarIcon size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900">ようこそ！<br/>WPB BandSyncへ</h3>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                このアプリは、バンドメンバー同士のスケジュール調整を劇的に簡単にするアプリです。
+              </p>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="text-center space-y-4">
+              <div className="w-16 h-16 bg-red-100 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-2">
+                <span className="text-3xl font-bold">×</span>
+              </div>
+              <h3 className="text-lg font-bold text-gray-900">1. マイ予定を入力しよう</h3>
+              <p className="text-sm text-gray-600 leading-relaxed text-left">
+                「マイ予定」タブからカレンダーの日付をタップし、<strong className="text-red-500">行けない時間（×）</strong>や<strong className="text-amber-500">微妙な時間（△）</strong>を登録します。<br/><br/>
+                「毎週」や「毎月」など、繰り返しの設定も一括で簡単にできます！
+              </p>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="text-center space-y-4">
+              <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-2">
+                <Users size={32} />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900">2. グループに参加しよう</h3>
+              <p className="text-sm text-gray-600 leading-relaxed text-left">
+                「グループ」タブから、自分が所属するバンドのグループを作成するか、リーダーから教わった<strong>6桁の参加コード</strong>を入力してグループに参加します。
+              </p>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="text-center space-y-4">
+              <div className="w-16 h-16 bg-emerald-100 text-emerald-500 rounded-2xl flex items-center justify-center mx-auto mb-2">
+                <Check size={32} strokeWidth={3} />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900">3. 空いている日が一目で！</h3>
+              <p className="text-sm text-gray-600 leading-relaxed text-left">
+                グループ画面の「空き日一覧」を見ると、<strong>メンバー全員が揃う日（◎）</strong>や、<strong>一部欠席でも集まれる日（△）</strong>が自動でリストアップされます。<br/><br/>
+                これで練習日決めはバッチリです！
+              </p>
+            </div>
+          )}
+
+          <div className="mt-8 flex gap-3">
+            {step > 1 && (
+              <button 
+                onClick={() => setStep(step - 1)}
+                className="py-3 px-4 bg-gray-100 text-gray-700 rounded-xl font-bold text-sm hover:bg-gray-200 transition-colors"
+              >
+                戻る
+              </button>
+            )}
+            <button 
+              onClick={() => {
+                if (step < totalSteps) setStep(step + 1);
+                else onClose();
+              }}
+              className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-indigo-700 transition-colors"
+            >
+              {step < totalSteps ? '次へ' : 'アプリを使い始める！'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('mySchedule');
@@ -56,18 +147,18 @@ export default function App() {
   const [authError, setAuthError] = useState('');
 
   const [activeGroup, setActiveGroup] = useState(null);
+  
+  // 【追加】チュートリアルの表示状態を管理するstate
+  const [showTutorial, setShowTutorial] = useState(false);
 
-  // 【追加】アプリ起動時に「1ヶ月有効なログインキー」が残っているかチェックする
   useEffect(() => {
     const storedAuth = localStorage.getItem('wpb_bandsync_auth');
     if (storedAuth) {
       try {
         const { userData, expiresAt } = JSON.parse(storedAuth);
-        // 現在の時間が、有効期限（30日後）より前なら自動ログイン
         if (new Date().getTime() < expiresAt) {
           setUser(userData);
         } else {
-          // 期限切れならキーを捨てる
           localStorage.removeItem('wpb_bandsync_auth');
         }
       } catch (e) {
@@ -89,10 +180,14 @@ export default function App() {
           const userData = querySnapshot.docs[0].data();
           const loggedInUser = { id: querySnapshot.docs[0].id, ...userData };
           setUser(loggedInUser);
-
-          // 【追加】ログイン成功時に、30日間の有効期限付きでキーを保存する
+          
           const expiresAt = new Date().getTime() + 30 * 24 * 60 * 60 * 1000;
           localStorage.setItem('wpb_bandsync_auth', JSON.stringify({ userData: loggedInUser, expiresAt }));
+
+          // 【追加】このデバイスでチュートリアルを見たことがなければ表示する
+          if (!localStorage.getItem('wpb_tutorial_seen')) {
+             setShowTutorial(true);
+          }
 
         } else {
           setAuthError('ユーザー名またはパスワードが間違っています。');
@@ -116,9 +211,11 @@ export default function App() {
         const loggedInUser = { id: docRef.id, ...newUser };
         setUser(loggedInUser);
 
-        // 【追加】新規登録成功時にも、30日間の有効期限付きでキーを保存する
         const expiresAt = new Date().getTime() + 30 * 24 * 60 * 60 * 1000;
         localStorage.setItem('wpb_bandsync_auth', JSON.stringify({ userData: loggedInUser, expiresAt }));
+        
+        // 【追加】新規登録時は無条件でチュートリアルを表示する
+        setShowTutorial(true);
 
       } catch (err) { setAuthError('登録エラー: ' + err.message); }
     }
@@ -129,12 +226,18 @@ export default function App() {
     setActiveTab('mySchedule'); 
     setActiveGroup(null);
     setAuthForm({ username: '', password: '', confirmPassword: '', displayName: '', year: '2026年度', parts: [] });
-    // 【追加】ログアウト時は保存していた鍵を破棄する
     localStorage.removeItem('wpb_bandsync_auth');
   };
 
   const togglePart = (part) => {
     setAuthForm(prev => ({ ...prev, parts: prev.parts.includes(part) ? prev.parts.filter(p => p !== part) : [...prev.parts, part] }));
+  };
+
+  // 【追加】チュートリアルを閉じるときの処理
+  const handleCloseTutorial = () => {
+    setShowTutorial(false);
+    // チュートリアルを見たという記録を残す
+    localStorage.setItem('wpb_tutorial_seen', 'true');
   };
 
   if (!user) {
@@ -213,12 +316,15 @@ export default function App() {
           <button onClick={handleLogout} className="text-gray-400 hover:text-gray-600"><LogOut size={20} /></button>
         </div>
       </header>
+      
       <main className="flex-1 w-full max-w-md mx-auto overflow-y-auto pb-20 relative">
         {activeTab === 'mySchedule' && <MyScheduleView user={user} />}
         {activeTab === 'groups' && <GroupsView user={user} activeGroup={activeGroup} setActiveGroup={setActiveGroup} />}
-        {activeTab === 'profile' && <ProfileView user={user} />}
+        {/* ProfileView に setShowTutorial を渡す */}
+        {activeTab === 'profile' && <ProfileView user={user} setShowTutorial={setShowTutorial} handleLogout={handleLogout} />}
         {activeTab === 'admin' && user.username === 'Boss' && <AdminView />}
       </main>
+
       <nav className="bg-white border-t border-gray-200 fixed bottom-0 w-full z-20 pb-safe">
         <div className="max-w-md mx-auto flex">
           <button onClick={() => setActiveTab('mySchedule')} className={`flex-1 py-3 flex flex-col items-center justify-center space-y-1 ${activeTab === 'mySchedule' ? 'text-indigo-600' : 'text-gray-400'}`}><CalendarIcon size={22} /><span className="text-[10px] font-medium">マイ予定</span></button>
@@ -227,6 +333,9 @@ export default function App() {
           {user.username === 'Boss' && <button onClick={() => setActiveTab('admin')} className={`flex-1 py-3 flex flex-col items-center justify-center space-y-1 ${activeTab === 'admin' ? 'text-red-600' : 'text-gray-400'}`}><Shield size={22} /><span className="text-[10px] font-medium">管理者</span></button>}
         </div>
       </nav>
+
+      {/* 【追加】チュートリアルモーダルの表示 */}
+      {showTutorial && <TutorialModal onClose={handleCloseTutorial} />}
     </div>
   );
 }
@@ -659,7 +768,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   
   const [groupMembers, setGroupMembers] = useState([]);
   const [allSchedules, setAllSchedules] = useState([]);
-  const [groupViewTab, setGroupViewTab] = useState('calendar'); // 'calendar' | 'list' | 'members'
+  const [groupViewTab, setGroupViewTab] = useState('calendar');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
 
@@ -914,6 +1023,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           const xCount = xMembers.length;
           const triCount = triangleMembers.length;
 
+          // 全員NGの枠は非表示
           if (xCount === totalMembers) continue; 
 
           let category = 0;
@@ -1102,7 +1212,8 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 }
 
 // --- ProfileView ---
-function ProfileView({ user }) {
+// 【変更】PropsにsetShowTutorialとhandleLogoutを受け取るように追加
+function ProfileView({ user, setShowTutorial, handleLogout }) {
   return (
     <div className="p-4 space-y-4">
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center relative overflow-hidden">
@@ -1114,6 +1225,34 @@ function ProfileView({ user }) {
           <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs font-medium border border-gray-200">{user.year}</span>
           {user.parts.map(part => <span key={part} className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold border border-indigo-100">{part}</span>)}
         </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mt-6">
+         <div className="p-4 border-b border-gray-50 flex items-center gap-3 text-gray-700">
+            <Settings size={20} className="text-gray-400" />
+            <span className="font-medium text-sm">アカウント設定</span>
+         </div>
+         
+         {/* 【追加】チュートリアルをもう一度見るボタン */}
+         <div 
+           className="p-4 border-b border-gray-50 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors"
+           onClick={() => setShowTutorial(true)}
+         >
+            <div className="flex items-center gap-2">
+              <BookOpen size={16} className="text-indigo-500" />
+              <span className="font-medium text-sm text-gray-700">使い方を見る (チュートリアル)</span>
+            </div>
+            <ChevronRight size={16} className="text-gray-400" />
+         </div>
+
+         {/* 【変更】ログアウトボタン */}
+         <div 
+           className="p-4 flex items-center justify-between bg-red-50 cursor-pointer hover:bg-red-100 transition-colors"
+           onClick={handleLogout}
+         >
+            <span className="font-medium text-sm text-red-600">ログアウト</span>
+            <LogOut size={16} className="text-red-500" />
+         </div>
       </div>
     </div>
   );
