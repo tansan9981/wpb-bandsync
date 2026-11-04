@@ -6,7 +6,7 @@ import {
 } from "firebase/firestore";
 import { 
   Calendar as CalendarIcon, Users, User, Settings, Check, 
-  X, ChevronLeft, ChevronRight, Shield, LogOut, Trash2, KeyRound, Info, BookOpen, AlertTriangle, Edit2
+  X, ChevronLeft, ChevronRight, Shield, LogOut, Trash2, KeyRound, BookOpen, AlertTriangle, Edit2
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -467,7 +467,7 @@ function MyScheduleView({ user }) {
         activeRule = rulesOfSameType.find(r => r.date === dStr);
     } else {
         const condition = type === 'weekly' ? (r => r.dayOfWeek === date.getDay()) :
-                          type === 'monthly' ? (r => r.dayOfMonth === selectedDate.getDate()) :
+                          type === 'monthly' ? (r => r.dayOfMonth === date.getDate()) :
                           (r => true);
         const validRules = rulesOfSameType.filter(r => condition(r) && (!r.startDate || r.startDate <= dStr) && (!r.endDate || r.endDate > dStr));
         if (validRules.length > 0) {
@@ -529,7 +529,6 @@ function MyScheduleView({ user }) {
         setMySchedules(prev => prev.map(r => r.id === tempId ? { id: docRef.id, ...newRule } : r));
       }
       
-      // 自分がBossの場合はbossSchedulesにも即時反映する
       if (user.username === 'Boss') {
         const bossQ = query(collection(db, "schedules"), where("userId", "==", user.id));
         const bossSnap = await getDocs(bossQ);
@@ -705,7 +704,6 @@ function MyScheduleView({ user }) {
   const renderDayDetail = () => {
     if (!selectedDate) return null;
     const periods = getPeriodListForDate(selectedDate);
-    const dStr = getLocalYMD(selectedDate);
     const isBoss = user.username === 'Boss';
 
     return (
@@ -776,7 +774,6 @@ function MyScheduleView({ user }) {
           </div>
         </div>
 
-        {/* 修正：各時限を独立したカード枠で囲み、どの時限の管理者連絡かひと目でわかるように変更 */}
         <div className="space-y-2.5 border-t border-gray-100 pt-3">
           {periods.map(period => {
             const rule = getScheduleRule(selectedDate, period);
@@ -826,7 +823,6 @@ function MyScheduleView({ user }) {
                     : 'bg-gray-50/70 border-gray-200/80'
                 }`}
               >
-                {/* 管理者連絡がある場合はその時限の枠内のトップに時限名入りで明記 */}
                 {bossNoticeText && (
                   <div className="mb-2 px-2.5 py-1.5 bg-purple-600 text-white rounded-xl text-[11px] font-bold flex items-center gap-1.5 shadow-sm">
                     <AlertTriangle size={14} className="shrink-0 text-amber-300" />
@@ -1560,7 +1556,7 @@ function AdminView() {
           {groups.map(g => (
             <div key={g.id} className="bg-white p-3 rounded-xl shadow-sm border flex justify-between">
               <div><p className="font-bold text-sm text-gray-900">{g.name}</p><p className="text-[10px] text-gray-500">コード: {g.joinCode}</p></div>
-              <button onClick={() => handleDelete('group', g.id)} className="text-red-500 p-2"><Trash2 size={16}/></button>}
+              <button onClick={() => handleDelete('group', g.id)} className="text-red-500 p-2"><Trash2 size={16}/></button>
             </div>
           ))}
         </div>
