@@ -321,8 +321,9 @@ export default function App() {
           </form>
         </div>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
@@ -359,9 +360,10 @@ function MyScheduleView({ user }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
   const [mySchedules, setMySchedules] = useState([]);
+  const [bossSchedules, setBossSchedules] = useState([]); 
   
   const [inputStatus, setInputStatus] = useState('x'); 
-  const [customText, setCustomText] = useState(''); // 管理者用の手入力テキスト
+  const [customText, setCustomText] = useState(''); 
   const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
@@ -370,9 +372,54 @@ function MyScheduleView({ user }) {
       const q = query(collection(db, "schedules"), where("userId", "==", user.id));
       const snap = await getDocs(q);
       setMySchedules(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+
+      // 全ユーザー共通でBossのスケジュールを取得する
+      const usersSnap = await getDocs(query(collection(db, "users"), where("username", "==", "Boss")));
+      if (!usersSnap.empty) {
+        const bossId = usersSnap.docs[0].id;
+        const bossQ = query(collection(db, "schedules"), where("userId", "==", bossId));
+        const bossSnap = await getDocs(bossQ);
+        setBossSchedules(bossSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }
     };
     fetchSchedules();
   }, [user]);
+
+  const getBossRule = (date, period) => {
+    const rules = bossSchedules.filter(r => r.period === period);
+    const dStr = getLocalYMD(date);
+    
+    const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
+    if (onceRule) return onceRule;
+
+    const isValidRule = (r) => {
+      if (r.startDate && r.startDate > dStr) return false;
+      if (r.endDate && r.endDate <= dStr) return false;
+      return true;
+    };
+
+    const findValidRule = (type, condition) => {
+       const validRules = rules.filter(r => r.type === type && condition(r) && isValidRule(r));
+       if (validRules.length === 0) return null;
+       validRules.sort((a, b) => {
+         const sa = a.startDate || '1970-01-01';
+         const sb = b.startDate || '1970-01-01';
+         return sa < sb ? 1 : (sa > sb ? -1 : 0);
+       });
+       return validRules[0];
+    };
+
+    const weeklyRule = findValidRule('weekly', r => r.dayOfWeek === date.getDay());
+    if (weeklyRule) return weeklyRule;
+    
+    const monthlyRule = findValidRule('monthly', r => r.dayOfMonth === date.getDate());
+    if (monthlyRule) return monthlyRule;
+    
+    const dailyRule = findValidRule('daily', r => true);
+    if (dailyRule) return dailyRule;
+    
+    return null;
+  };
 
   const getScheduleRule = (date, period) => {
     const rules = mySchedules.filter(r => r.period === period);
@@ -422,7 +469,7 @@ function MyScheduleView({ user }) {
         activeRule = rulesOfSameType.find(r => r.date === dStr);
     } else {
         const condition = type === 'weekly' ? (r => r.dayOfWeek === date.getDay()) :
-                          type === 'monthly' ? (r => r.dayOfMonth === date.getDate()) :
+                          type === 'monthly' ? (r => r.dayOfMonth === selectedDate.getDate()) :
                           (r => true);
         const validRules = rulesOfSameType.filter(r => condition(r) && (!r.startDate || r.startDate <= dStr) && (!r.endDate || r.endDate > dStr));
         if (validRules.length > 0) {
@@ -443,7 +490,6 @@ function MyScheduleView({ user }) {
         const currentText = activeRule.text || '';
         const safeStartDate = activeRule.startDate || '2000-01-01';
         
-        // 同じステータスかつテキストも同じなら解除
         if ((currentStatus === newStatus && currentText === textVal) || (!activeRule.status && newStatus === 'x' && !textVal)) {
             if (type === 'once' || safeStartDate === dStr) {
                 setMySchedules(newSchedules.filter(r => r.id !== activeRule.id));
@@ -599,10 +645,14 @@ function MyScheduleView({ user }) {
       let hasX = false;
       let hasTriangle = false;
       let hasOk = false;
-      let hasStudioOrText = false; // 管理者のスタジオ不可・テキスト表示用
+      let hasStudioOrText = false; 
       
       periods.forEach(p => {
         const rule = getScheduleRule(d, p);
+        const bossRule = getBossRule(d, p);
+        if (bossRule && (bossRule.status === 'studio1' || bossRule.status === 'studio2' || bossRule.text)) {
+          hasStudioOrText = true;
+        }
         if (rule) {
           if (rule.status === 'studio1' || rule.status === 'studio2' || rule.text) hasStudioOrText = true;
           if (rule.status === 'ok') hasOk = true;
@@ -660,14 +710,12 @@ function MyScheduleView({ user }) {
           <button onClick={() => setSelectedDate(null)} className="p-1 bg-gray-100 rounded-full hover:bg-gray-200"><X size={16}/></button>
         </div>
         
-        {/* モード選択ボタン（Bossの場合は専用オプションを含む） */}
         <div className="flex gap-1 mb-2 bg-gray-100 p-1 rounded-xl">
           <button onClick={() => setInputStatus('x')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${inputStatus === 'x' ? 'bg-red-500 text-white shadow' : 'text-gray-500 hover:bg-gray-200'}`}>× 行けない</button>
           <button onClick={() => setInputStatus('triangle')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${inputStatus === 'triangle' ? 'bg-amber-500 text-white shadow' : 'text-gray-500 hover:bg-gray-200'}`}>△ 微妙</button>
           <button onClick={() => setInputStatus('ok')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${inputStatus === 'ok' ? 'bg-blue-500 text-white shadow' : 'text-gray-500 hover:bg-gray-200'}`}>〇 臨時OK</button>
         </div>
 
-        {/* Boss専用の追加選択肢 */}
         {isBoss && (
           <div className="grid grid-cols-2 gap-1 mb-3">
             <button onClick={() => setInputStatus('studio1')} className={`py-2 text-xs font-bold rounded-lg transition-colors border ${inputStatus === 'studio1' ? 'bg-purple-600 text-white border-purple-700 shadow' : 'bg-purple-50 text-purple-700 border-purple-200'}`}>1スタジオ不可</button>
@@ -675,7 +723,6 @@ function MyScheduleView({ user }) {
           </div>
         )}
 
-        {/* Boss専用の手入力テキストフィールド */}
         {isBoss && (
           <div className="mb-4">
             <label className="block text-[10px] font-bold text-gray-700 mb-1">管理者手入力（各限に文字を表示）</label>
@@ -727,10 +774,19 @@ function MyScheduleView({ user }) {
         <div className="space-y-3 border-t border-gray-100 pt-3">
           {periods.map(period => {
             const rule = getScheduleRule(selectedDate, period);
+            const bossRule = getBossRule(selectedDate, period);
+
             const isActive = !!rule;
             const activeType = rule ? rule.type : null;
             const activeStatus = rule ? (rule.status || 'x') : null;
             const activeText = rule ? rule.text : '';
+
+            let bossNoticeText = '';
+            if (bossRule) {
+              if (bossRule.status === 'studio1') bossNoticeText = '1スタ不可';
+              else if (bossRule.status === 'studio2') bossNoticeText = '2スタ不可';
+              else if (bossRule.text) bossNoticeText = bossRule.text;
+            }
             
             const btnColor = (type) => {
               if (isActive && activeType === type) {
@@ -752,28 +808,37 @@ function MyScheduleView({ user }) {
             };
 
             return (
-              <div key={period} className="flex items-center gap-2">
-                <div className={`w-16 text-center font-bold py-2 rounded-xl text-xs flex flex-col items-center justify-center ${periodBadgeColor()}`}>
-                  <span>{formatPeriod(period)}</span>
-                  {isActive && <span className="text-[7px] font-normal opacity-90 -mt-0.5 truncate max-w-[50px]">{activeText || (activeType === 'once' ? 'この日' : activeType === 'weekly' ? '毎週' : activeType === 'monthly' ? '毎月' : '毎日')}</span>}
-                </div>
+              <div key={period} className="flex flex-col gap-1">
+                {/* 管理者連絡がある場合はユーザーの画面でも紫色で表示する */}
+                {bossNoticeText && (
+                  <div className="text-[10px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md font-bold flex items-center gap-1 border border-purple-200">
+                    <AlertTriangle size={12}/> 管理者連絡: {bossNoticeText}
+                  </div>
+                )}
+                
+                <div className="flex items-center gap-2">
+                  <div className={`w-16 text-center font-bold py-2 rounded-xl text-xs flex flex-col items-center justify-center ${periodBadgeColor()}`}>
+                    <span>{formatPeriod(period)}</span>
+                    {isActive && <span className="text-[7px] font-normal opacity-90 -mt-0.5 truncate max-w-[50px]">{activeText || (activeType === 'once' ? 'この日' : activeType === 'weekly' ? '毎週' : activeType === 'monthly' ? '毎月' : '毎日')}</span>}
+                  </div>
 
-                <div className="flex-1 grid grid-cols-4 gap-1">
-                  {['once:この日', 'weekly:毎週', 'monthly:毎月', 'daily:毎日'].map(t => {
-                    const [type, label] = t.split(':');
-                    const isDisabledByMode = (inputStatus === 'ok' || inputStatus === 'studio1' || inputStatus === 'studio2') && type !== 'once';
+                  <div className="flex-1 grid grid-cols-4 gap-1">
+                    {['once:この日', 'weekly:毎週', 'monthly:毎月', 'daily:毎日'].map(t => {
+                      const [type, label] = t.split(':');
+                      const isDisabledByMode = (inputStatus === 'ok' || inputStatus === 'studio1' || inputStatus === 'studio2') && type !== 'once';
 
-                    return (
-                      <button 
-                        key={type} 
-                        onClick={() => toggleSchedule(selectedDate, period, type, inputStatus, isBoss ? customText : '')} 
-                        disabled={isDisabledByMode} 
-                        className={`py-2 text-[10px] font-medium rounded-xl transition-all ${btnColor(type)}`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
+                      return (
+                        <button 
+                          key={type} 
+                          onClick={() => toggleSchedule(selectedDate, period, type, inputStatus, isBoss ? customText : '')} 
+                          disabled={isDisabledByMode} 
+                          className={`py-2 text-[10px] font-medium rounded-xl transition-all ${btnColor(type)}`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             );
@@ -814,7 +879,8 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       const fetchDetails = async () => {
         const snapM = await getDocs(collection(db, "users"));
         const allU = snapM.docs.map(d => ({ id: d.id, ...d.data() }));
-        setGroupMembers(allU.filter(u => activeGroup.members.includes(u.id)));
+        // グループメンバーに加えてBossも常時保持
+        setGroupMembers(allU.filter(u => activeGroup.members.includes(u.id) || u.username === 'Boss'));
         
         const snapS = await getDocs(collection(db, "schedules"));
         const allS = snapS.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -890,9 +956,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     return null;
   };
 
-  // BossのユーザーIDを特定するためのヘルパー
-  const bossUser = groupMembers.find(m => m.username === 'Boss');
-
   const getDayStatus = (date) => {
     if(groupMembers.length === 0) return { dayStatus: 'ng', detail: [] };
     const periods = getPeriodListForDate(date);
@@ -904,7 +967,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       const xMembers = [];
       const triangleMembers = [];
       const okMembers = [];
-      let bossNotice = null; // Bossの特殊設定（スタジオ不可や手入力）を格納
+      let bossNotice = null; 
       
       groupMembers.forEach(m => {
         const rule = getUserScheduleRule(m.id, date, p);
@@ -915,16 +978,22 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             else if (rule.text) bossNotice = rule.text;
           }
 
-          if (rule.status === 'ok') okMembers.push(m);
-          else if (rule.status === 'triangle') triangleMembers.push(m);
-          else if (rule.status === 'x') xMembers.push(m);
+          if (m.username !== 'Boss') {
+            if (rule.status === 'ok') okMembers.push(m);
+            else if (rule.status === 'triangle') triangleMembers.push(m);
+            else if (rule.status === 'x') xMembers.push(m);
+          }
         }
       });
 
       detail.push({ period: p, xMembers, triangleMembers, okMembers, bossNotice });
       
-      if (xMembers.length === 0 && triangleMembers.length === 0) isAnyPeriodAllOK = true;
-      else if (xMembers.length === 0 && triangleMembers.length > 0) isAnyPeriodTriangleOnly = true;
+      const actualMembersCount = groupMembers.filter(m => m.username !== 'Boss').length;
+      const isAllOkPeriod = xMembers.length === 0 && triangleMembers.length === 0 && actualMembersCount > 0;
+      const isTriPeriod = xMembers.length === 0 && triangleMembers.length > 0 && actualMembersCount > 0;
+
+      if (isAllOkPeriod) isAnyPeriodAllOK = true;
+      else if (isTriPeriod) isAnyPeriodTriangleOnly = true;
     }
     
     let dayStatus = 'ng';
@@ -953,7 +1022,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         let bgColor = 'bg-white border border-gray-100';
         let icon = null;
 
-        // Bossの通知がある場合はカレンダーでも紫色のハイライト
         const hasBossNotice = status.detail.some(p => p.bossNotice);
         if (hasBossNotice) {
           bgColor = 'bg-purple-50 border border-purple-300 shadow-sm';
@@ -1001,8 +1069,9 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           </div>
           <div className="space-y-2">
             {status.detail.map((p) => {
-              const isAllOK = p.xMembers.length === 0 && p.triangleMembers.length === 0;
-              const isTriangle = p.xMembers.length === 0 && p.triangleMembers.length > 0;
+              const actualMembersCount = groupMembers.filter(m => m.username !== 'Boss').length;
+              const isAllOK = p.xMembers.length === 0 && p.triangleMembers.length === 0 && actualMembersCount > 0;
+              const isTriangle = p.xMembers.length === 0 && p.triangleMembers.length > 0 && actualMembersCount > 0;
               
               let itemBg = 'bg-gray-50 border-gray-100';
               let badgeBg = 'bg-gray-200 text-gray-700';
@@ -1014,7 +1083,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                 <div key={p.period} className={`p-3 rounded-xl flex items-center gap-3 border ${itemBg}`}>
                   <div className={`w-14 text-center font-bold text-xs py-1.5 rounded-lg ${badgeBg}`}>{formatPeriod(p.period)}</div>
                   <div className="flex-1">
-                    {/* 管理者通知がある場合は最優先で大きく表示 */}
                     {p.bossNotice && (
                       <div className="text-xs font-bold text-purple-700 flex items-center gap-1 mb-1 bg-purple-100/60 p-1.5 rounded-lg">
                         <AlertTriangle size={14} className="shrink-0" />
@@ -1049,9 +1117,9 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     const renderAvailableList = () => {
       const today = new Date();
       const list = [];
-      const totalMembers = groupMembers.length;
+      const actualMembersCount = groupMembers.filter(m => m.username !== 'Boss').length;
 
-      if (totalMembers === 0) return <div className="p-8 text-center text-gray-500">メンバーがいません。</div>;
+      if (actualMembersCount === 0) return <div className="p-8 text-center text-gray-500">メンバーがいません。</div>;
 
       for(let i=0; i<60; i++) {
         const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
@@ -1068,24 +1136,26 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             const rule = getUserScheduleRule(m.id, d, p);
             if (rule) {
               if (m.username === 'Boss') {
-                if (rule.status === 'studio1') bossNotice = '1スタジオ不可';
-                else if (rule.status === 'studio2') bossNotice = '2スタジオ不可';
+                if (rule.status === 'studio1') bossNotice = '1スタジオ使用不可';
+                else if (rule.status === 'studio2') bossNotice = '2スタジオ使用不可';
                 else if (rule.text) bossNotice = rule.text;
               }
 
-              if (rule.status === 'ok') okMembers.push(m);
-              else if (rule.status === 'triangle') triangleMembers.push(m);
-              else if (rule.status === 'x') xMembers.push(m);
+              if (m.username !== 'Boss') {
+                if (rule.status === 'ok') okMembers.push(m);
+                else if (rule.status === 'triangle') triangleMembers.push(m);
+                else if (rule.status === 'x') xMembers.push(m);
+              }
             }
           });
 
           const xCount = xMembers.length;
           const triCount = triangleMembers.length;
 
-          if (xCount === totalMembers && !bossNotice) continue; 
+          if (xCount === actualMembersCount && !bossNotice) continue; 
 
           let category = 0;
-          if (bossNotice) category = 5; // 管理者通知あり
+          if (bossNotice) category = 5; 
           else if (xCount === 0 && triCount === 0) category = 1;
           else if (xCount === 0 && triCount > 0) category = 2;
           else if (xCount > 0 && triCount === 0) category = 3;
@@ -1108,7 +1178,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-purple-100 text-purple-700 font-bold">管 管理者連絡</span> スタジオ不可や手入力事項</div>
             <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">◎ 全員参加</span> 全員が「〇」の枠</div>
             <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">〇 全員OK</span> 全員参加できるが「△」を含む</div>
-            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-bold">△ 一部NG</span> 欠席者がいるが、参加者は全員「〇」</div>
           </div>
 
           {list.map((item, idx) => (
@@ -1136,7 +1205,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                         {badge}
                       </div>
                       
-                      {/* 管理者連絡がある場合は強調 */}
                       {dp.bossNotice && (
                         <div className="text-xs font-bold text-purple-700 ml-14 bg-purple-100/70 p-2 rounded-lg flex items-center gap-1.5">
                           <AlertTriangle size={14} className="shrink-0" />
@@ -1174,12 +1242,13 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     };
 
     const renderMemberList = () => {
+      const pureMembers = groupMembers.filter(m => m.username !== 'Boss');
       return (
         <div className="p-4 space-y-3">
           <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
-            <span className="font-bold text-gray-800">メンバー一覧 ({groupMembers.length}人)</span>
+            <span className="font-bold text-gray-800">メンバー一覧 ({pureMembers.length}人)</span>
           </div>
-          {groupMembers.map(m => (
+          {pureMembers.map(m => (
             <div key={m.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4">
               <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl shadow-inner shrink-0">
                 {m.displayName.substring(0, 1)}
@@ -1210,7 +1279,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           <div>
             <h2 className="text-xl font-bold text-gray-900">{activeGroup.name}</h2>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-xs text-gray-500">メンバー {groupMembers.length}人</span>
+              <span className="text-xs text-gray-500">メンバー {groupMembers.filter(m => m.username !== 'Boss').length}人</span>
               <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">コード: <strong className="font-mono tracking-widest">{activeGroup.joinCode}</strong></span>
             </div>
           </div>
