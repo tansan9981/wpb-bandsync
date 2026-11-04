@@ -54,7 +54,7 @@ function TutorialModal({ onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+      <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl overflow-hidden">
         <div className="h-2 bg-gray-100 w-full">
           <div 
             className="h-full bg-indigo-500 transition-all duration-300 ease-out" 
@@ -136,7 +136,7 @@ function TutorialModal({ onClose }) {
               <h3 className="text-lg font-bold text-gray-900">5. 空き日が一目でわかる！</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
                 グループ画面の「空き日一覧」タブを見ると、メンバーの予定を自動で計算してリストアップします。<br/><br/>
-                <strong><span>◎ 全員参加</span></strong>の日や、<strong><span>△ 一部NG（誰がいないか）</span></strong>がひと目で分かるので、練習日決めが圧倒的にスムーズになります！
+                <strong>◎ 全員参加</strong>の日や、<strong>△ 一部NG（誰がいないか）</strong>がひと目で分かるので、練習日決めが圧倒的にスムーズになります！
               </p>
             </div>
           )}
@@ -321,9 +321,8 @@ export default function App() {
           </form>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
@@ -373,7 +372,6 @@ function MyScheduleView({ user }) {
       const snap = await getDocs(q);
       setMySchedules(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
 
-      // 全ユーザー共通でBossのスケジュールを取得する
       const usersSnap = await getDocs(query(collection(db, "users"), where("username", "==", "Boss")));
       if (!usersSnap.empty) {
         const bossId = usersSnap.docs[0].id;
@@ -809,7 +807,6 @@ function MyScheduleView({ user }) {
 
             return (
               <div key={period} className="flex flex-col gap-1">
-                {/* 管理者連絡がある場合はユーザーの画面でも紫色で表示する */}
                 {bossNoticeText && (
                   <div className="text-[10px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md font-bold flex items-center gap-1 border border-purple-200">
                     <AlertTriangle size={12}/> 管理者連絡: {bossNoticeText}
@@ -879,7 +876,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       const fetchDetails = async () => {
         const snapM = await getDocs(collection(db, "users"));
         const allU = snapM.docs.map(d => ({ id: d.id, ...d.data() }));
-        // グループメンバーに加えてBossも常時保持
         setGroupMembers(allU.filter(u => activeGroup.members.includes(u.id) || u.username === 'Boss'));
         
         const snapS = await getDocs(collection(db, "schedules"));
