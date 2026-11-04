@@ -31,10 +31,11 @@ try {
 // --- Shared Logic ---
 const generateJoinCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
+// 【変更】日曜日(0)以外はすべて5, 6限を追加（土曜日も6限まで対応）
 const getPeriodListForDate = (date) => {
   const day = date.getDay();
   const base = ['1', '2', 'lunch', '3', '4'];
-  if (day !== 0 && day !== 6) base.push('5', '6');
+  if (day !== 0) base.push('5', '6');
   return base;
 };
 
@@ -50,7 +51,7 @@ const getLocalYMD = (date) => {
 // --- Tutorial Component ---
 function TutorialModal({ onClose }) {
   const [step, setStep] = useState(1);
-  const totalSteps = 6; // ステップ数を6に増加
+  const totalSteps = 6;
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
@@ -175,7 +176,6 @@ export default function App() {
   const [authError, setAuthError] = useState('');
 
   const [activeGroup, setActiveGroup] = useState(null);
-  
   const [showTutorial, setShowTutorial] = useState(false);
 
   useEffect(() => {
@@ -200,6 +200,7 @@ export default function App() {
     if (!db) { setAuthError('データベースに接続できません。'); return; }
     
     if (isLogin) {
+      // 【変更】ログイン（再ログイン）時はチュートリアルを自動表示しない
       try {
         const q = query(collection(db, "users"), where("username", "==", authForm.username), where("password", "==", authForm.password));
         const querySnapshot = await getDocs(q);
@@ -210,16 +211,12 @@ export default function App() {
           
           const expiresAt = new Date().getTime() + 30 * 24 * 60 * 60 * 1000;
           localStorage.setItem('wpb_bandsync_auth', JSON.stringify({ userData: loggedInUser, expiresAt }));
-
-          if (!localStorage.getItem('wpb_tutorial_seen')) {
-             setShowTutorial(true);
-          }
-
         } else {
           setAuthError('ユーザー名またはパスワードが間違っています。');
         }
       } catch (err) { setAuthError('エラーが発生しました: ' + err.message); }
     } else {
+      // 新規登録時のみチュートリアルを表示する
       if (!authForm.username || !authForm.password || !authForm.displayName) { setAuthError('必須項目を入力してください。'); return; }
       if (authForm.password !== authForm.confirmPassword) { setAuthError('パスワードと確認用パスワードが一致しません。'); return; }
 
@@ -260,7 +257,6 @@ export default function App() {
 
   const handleCloseTutorial = () => {
     setShowTutorial(false);
-    localStorage.setItem('wpb_tutorial_seen', 'true');
   };
 
   if (!user) {
@@ -1044,7 +1040,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           const xCount = xMembers.length;
           const triCount = triangleMembers.length;
 
-          // 全員NGの枠は非表示
           if (xCount === totalMembers) continue; 
 
           let category = 0;
