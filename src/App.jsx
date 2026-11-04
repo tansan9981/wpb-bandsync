@@ -649,25 +649,19 @@ function MyScheduleView({ user }) {
       let hasX = false;
       let hasTriangle = false;
       let hasOk = false;
-      let hasStudioOrText = false; 
       
       periods.forEach(p => {
         const rule = getScheduleRule(d, p);
-        const bossRule = getBossRule(d, p);
-        if (bossRule && (bossRule.status === 'studio1' || bossRule.status === 'studio2' || bossRule.text)) {
-          hasStudioOrText = true;
-        }
         if (rule) {
-          if (rule.status === 'studio1' || rule.status === 'studio2' || rule.text) hasStudioOrText = true;
           if (rule.status === 'ok') hasOk = true;
           else if (rule.status === 'triangle') hasTriangle = true;
           else if (rule.status === 'x') hasX = true;
         }
       });
       
+      // 修正：管理者の表示があってもカレンダーの背景色は予定に合わせた元の色にする
       let bgColor = 'bg-white border-gray-200';
-      if (hasStudioOrText) bgColor = 'bg-purple-50 border-purple-200';
-      else if (hasX) bgColor = 'bg-white border-gray-200';
+      if (hasX) bgColor = 'bg-white border-gray-200';
       else if (hasTriangle) bgColor = 'bg-amber-50 border-amber-100';
       else if (hasOk) bgColor = 'bg-blue-50 border-blue-100';
       else bgColor = 'bg-indigo-50 border-indigo-100';
@@ -676,8 +670,7 @@ function MyScheduleView({ user }) {
         <div key={i} onClick={() => setSelectedDate(d)} className="p-1 cursor-pointer">
           <div className={`h-12 rounded-xl flex flex-col items-center justify-center border ${bgColor} ${selectedDate?.toDateString() === d.toDateString() ? 'ring-2 ring-indigo-500' : ''}`}>
             <span className={`text-sm font-medium ${d.getDay()===0 ? 'text-red-500' : d.getDay()===6 ? 'text-blue-500' : 'text-gray-700'}`}>{i}</span>
-            <div className="flex gap-0.5 mt-0.5 text-[10px] leading-none font-bold">
-              {hasStudioOrText && <span className="text-purple-600">管</span>}
+            <div className="flex gap-0.5 mt-0.5 text-[12px] leading-none font-bold">
               {hasX && <span className="text-red-500">×</span>}
               {!hasX && hasTriangle && <span className="text-amber-500">△</span>}
               {!hasX && !hasTriangle && hasOk && <span className="text-blue-500">〇</span>}
@@ -721,8 +714,8 @@ function MyScheduleView({ user }) {
 
         {isBoss && (
           <div className="grid grid-cols-2 gap-1 mb-3">
-            <button onClick={() => setInputStatus('studio1')} className={`py-2 text-xs font-bold rounded-lg transition-colors border ${inputStatus === 'studio1' ? 'bg-purple-600 text-white border-purple-700 shadow' : 'bg-purple-50 text-purple-700 border-purple-200'}`}>1スタジオ不可</button>
-            <button onClick={() => setInputStatus('studio2')} className={`py-2 text-xs font-bold rounded-lg transition-colors border ${inputStatus === 'studio2' ? 'bg-purple-600 text-white border-purple-700 shadow' : 'bg-purple-50 text-purple-700 border-purple-200'}`}>2スタジオ不可</button>
+            <button onClick={() => setInputStatus('studio1')} className={`py-2 text-xs font-bold rounded-lg transition-colors border ${inputStatus === 'studio1' ? 'bg-indigo-600 text-white border-indigo-700 shadow' : 'bg-indigo-50 text-indigo-700 border-indigo-200'}`}>1スタジオ不可</button>
+            <button onClick={() => setInputStatus('studio2')} className={`py-2 text-xs font-bold rounded-lg transition-colors border ${inputStatus === 'studio2' ? 'bg-indigo-600 text-white border-indigo-700 shadow' : 'bg-indigo-50 text-indigo-700 border-indigo-200'}`}>2スタジオ不可</button>
           </div>
         )}
 
@@ -732,7 +725,7 @@ function MyScheduleView({ user }) {
             <input 
               type="text" 
               placeholder="例: 機材メンテナンス 等" 
-              className="w-full border border-purple-200 bg-purple-50/50 p-2 rounded-xl text-xs focus:ring-2 focus:ring-purple-500" 
+              className="w-full border border-gray-300 bg-gray-50 p-2 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500" 
               value={customText} 
               onChange={e => setCustomText(e.target.value)}
             />
@@ -741,14 +734,14 @@ function MyScheduleView({ user }) {
 
         <p className="text-[10px] text-gray-500 mb-4 bg-gray-50 p-2 rounded-lg leading-relaxed">
           上のボタンでモードを選択後、下の枠をタップしてください。<br/>
-          {isBoss && <span className="text-purple-700 font-bold">管理者権限：</span>}
+          {isBoss && <span className="text-indigo-700 font-bold">管理者権限：</span>}
           <span className="text-blue-600 font-bold">「〇 臨時OK」</span>は「この日」のみ選択可能です。
         </p>
 
         <div className="mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
           <div className="text-xs font-bold text-indigo-800 mb-2 flex items-center justify-between">
             <span>この日を一括で設定（全日）</span>
-            <span className={`text-[10px] px-2 py-0.5 rounded-full text-white ${inputStatus === 'x' ? 'bg-red-500' : inputStatus === 'triangle' ? 'bg-amber-500' : inputStatus === 'ok' ? 'bg-blue-500' : 'bg-purple-600'}`}>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full text-white ${inputStatus === 'x' ? 'bg-red-500' : inputStatus === 'triangle' ? 'bg-amber-500' : inputStatus === 'ok' ? 'bg-blue-500' : 'bg-indigo-600'}`}>
               選択中: {inputStatus === 'x' ? '×' : inputStatus === 'triangle' ? '△' : inputStatus === 'ok' ? '〇' : inputStatus === 'studio1' ? '1スタ不可' : '2スタ不可'}
             </span>
           </div>
@@ -793,7 +786,7 @@ function MyScheduleView({ user }) {
             
             const btnColor = (type) => {
               if (isActive && activeType === type) {
-                if (activeStatus === 'studio1' || activeStatus === 'studio2') return 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-200';
+                if (activeStatus === 'studio1' || activeStatus === 'studio2') return 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-200';
                 if (activeStatus === 'x') return 'bg-red-500 text-white shadow-sm ring-2 ring-red-200';
                 if (activeStatus === 'triangle') return 'bg-amber-500 text-white shadow-sm ring-2 ring-amber-200';
                 if (activeStatus === 'ok') return 'bg-blue-500 text-white shadow-sm ring-2 ring-blue-200';
@@ -802,13 +795,10 @@ function MyScheduleView({ user }) {
               return 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 shadow-sm';
             };
 
+            // 修正：時限バッジの色も自分の予定に合わせた元の色にする
             const periodBadgeColor = () => {
-              if (!isActive) {
-                return bossNoticeText 
-                  ? 'bg-purple-200/80 text-purple-900 border border-purple-300' 
-                  : 'bg-white text-gray-700 border border-gray-200 shadow-sm';
-              }
-              if (activeStatus === 'studio1' || activeStatus === 'studio2' || activeText) return 'bg-purple-600 text-white shadow-sm';
+              if (!isActive) return 'bg-white text-gray-700 border border-gray-200 shadow-sm';
+              if (activeStatus === 'studio1' || activeStatus === 'studio2' || activeText) return 'bg-indigo-100 text-indigo-800 border border-indigo-200';
               if (activeStatus === 'x') return 'bg-red-100 text-red-700 border border-red-200';
               if (activeStatus === 'triangle') return 'bg-amber-100 text-amber-700 border border-amber-200';
               return 'bg-blue-100 text-blue-700 border border-blue-200';
@@ -817,15 +807,11 @@ function MyScheduleView({ user }) {
             return (
               <div 
                 key={period} 
-                className={`p-2.5 rounded-2xl border transition-all ${
-                  bossNoticeText 
-                    ? 'bg-purple-50/70 border-purple-300 shadow-sm' 
-                    : 'bg-gray-50/70 border-gray-200/80'
-                }`}
+                className="p-2.5 rounded-2xl border bg-gray-50/70 border-gray-200/80 transition-all"
               >
                 {bossNoticeText && (
-                  <div className="mb-2 px-2.5 py-1.5 bg-purple-600 text-white rounded-xl text-[11px] font-bold flex items-center gap-1.5 shadow-sm">
-                    <AlertTriangle size={14} className="shrink-0 text-amber-300" />
+                  <div className="mb-2 px-2.5 py-1.5 bg-white text-gray-800 rounded-xl text-[11px] font-bold flex items-center gap-1.5 border border-gray-200 shadow-sm">
+                    <AlertTriangle size={14} className="shrink-0 text-amber-500" />
                     <span>【{formatPeriod(period)}】管理者連絡: {bossNoticeText}</span>
                   </div>
                 )}
@@ -1052,14 +1038,11 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         const d = new Date(currentDate.getFullYear(), currentDate.getMonth(), i);
         const status = getDayStatus(d);
         
+        // 修正：バンドのカレンダーでも紫色に変えず、予定に合わせた元の色（緑・黄色など）にする
         let bgColor = 'bg-white border border-gray-100';
         let icon = null;
 
-        const hasBossNotice = status.detail.some(p => p.bossNotice);
-        if (hasBossNotice) {
-          bgColor = 'bg-purple-50 border border-purple-300 shadow-sm';
-          icon = <span className="text-purple-600 text-[10px] font-bold mt-1">管</span>;
-        } else if (status.dayStatus === 'ok') {
+        if (status.dayStatus === 'ok') {
           bgColor = 'bg-emerald-50 border border-emerald-300 shadow-sm';
           icon = <Check size={12} className="text-emerald-500 mt-1" strokeWidth={3} />;
         } else if (status.dayStatus === 'triangle') {
@@ -1106,10 +1089,10 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
               const isAllOK = p.xMembers.length === 0 && p.triangleMembers.length === 0 && actualMembersCount > 0;
               const isTriangle = p.xMembers.length === 0 && p.triangleMembers.length > 0 && actualMembersCount > 0;
               
+              // 修正：詳細リストも紫色に変えず、元の予定に合った色（緑・黄色・グレー）にする
               let itemBg = 'bg-gray-50 border-gray-100';
               let badgeBg = 'bg-gray-200 text-gray-700';
-              if (p.bossNotice) { itemBg = 'bg-purple-50 border-purple-200'; badgeBg = 'bg-purple-600 text-white'; }
-              else if (isAllOK) { itemBg = 'bg-emerald-50 border-emerald-200'; badgeBg = 'bg-emerald-200 text-emerald-800'; } 
+              if (isAllOK) { itemBg = 'bg-emerald-50 border-emerald-200'; badgeBg = 'bg-emerald-200 text-emerald-800'; } 
               else if (isTriangle) { itemBg = 'bg-amber-50 border-amber-200'; badgeBg = 'bg-amber-200 text-amber-800'; }
 
               return (
@@ -1117,8 +1100,8 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                   <div className={`w-14 text-center font-bold text-xs py-1.5 rounded-lg shrink-0 ${badgeBg}`}>{formatPeriod(p.period)}</div>
                   <div className="flex-1">
                     {p.bossNotice && (
-                      <div className="text-xs font-bold text-purple-800 flex items-center gap-1 mb-1 bg-purple-100 p-1.5 rounded-lg border border-purple-200">
-                        <AlertTriangle size={14} className="shrink-0 text-purple-600" />
+                      <div className="text-xs font-bold text-gray-800 flex items-center gap-1 mb-1 bg-white/90 p-1.5 rounded-lg border border-gray-200 shadow-sm">
+                        <AlertTriangle size={14} className="shrink-0 text-amber-500" />
                         <span>【{formatPeriod(p.period)}】管理者連絡: {p.bossNotice}</span>
                       </div>
                     )}
@@ -1187,9 +1170,9 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
           if (xCount === actualMembersCount && !bossNotice) continue; 
 
+          // 修正：管理者連絡があってもカテゴリーを紫（5）に上書きせず、元の予定に合わせた1〜4にする
           let category = 0;
-          if (bossNotice) category = 5; 
-          else if (xCount === 0 && triCount === 0) category = 1;
+          if (xCount === 0 && triCount === 0) category = 1;
           else if (xCount === 0 && triCount > 0) category = 2;
           else if (xCount > 0 && triCount === 0) category = 3;
           else if (xCount > 0 && triCount > 0) category = 4;
@@ -1208,9 +1191,10 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         <div className="p-4 space-y-4">
           <div className="bg-white p-3 rounded-xl shadow-sm border text-xs space-y-1.5">
             <div className="font-bold text-gray-700 mb-2 border-b pb-1">状況の見方</div>
-            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-purple-100 text-purple-700 font-bold">管 管理者連絡</span> スタジオ不可や手入力事項</div>
             <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">◎ 全員参加</span> 全員が「〇」の枠</div>
             <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">〇 全員OK</span> 全員参加できるが「△」を含む</div>
+            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-bold">△ 一部NG</span> 欠席者がいるが、参加者は全員「〇」</div>
+            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-red-100 text-red-700 font-bold">▲ 要調整</span> 欠席者がおり、参加者にも「△」を含む</div>
           </div>
 
           {list.map((item, idx) => (
@@ -1225,22 +1209,21 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
               <div className="space-y-3">
                 {item.dayPeriods.map(dp => {
                   let badge = '';
-                  if (dp.category === 5) badge = <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0 flex items-center gap-1"><AlertTriangle size={12}/> 管理者連絡有</span>;
-                  else if (dp.category === 1) badge = <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">◎ 全員参加</span>;
+                  if (dp.category === 1) badge = <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">◎ 全員参加</span>;
                   else if (dp.category === 2) badge = <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">〇 全員OK(△有)</span>;
                   else if (dp.category === 3) badge = <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">△ 一部NG(残〇)</span>;
                   else if (dp.category === 4) badge = <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">▲ 要調整(△有)</span>;
 
                   return (
-                    <div key={dp.period} className={`flex flex-col gap-1.5 p-2.5 rounded-xl border ${dp.bossNotice ? 'bg-purple-50/70 border-purple-200' : 'bg-gray-50 border-gray-100'}`}>
+                    <div key={dp.period} className="flex flex-col gap-1.5 p-2.5 rounded-xl border bg-gray-50 border-gray-100">
                       <div className="flex items-center gap-3">
                         <span className="font-bold text-gray-800 w-12 text-center text-sm">{formatPeriod(dp.period)}</span>
                         {badge}
                       </div>
                       
                       {dp.bossNotice && (
-                        <div className="text-xs font-bold text-purple-800 ml-14 bg-purple-100 p-2 rounded-lg flex items-center gap-1.5 border border-purple-200">
-                          <AlertTriangle size={14} className="shrink-0 text-purple-600" />
+                        <div className="text-xs font-bold text-gray-800 ml-14 bg-white p-2 rounded-lg flex items-center gap-1.5 border border-gray-200 shadow-sm">
+                          <AlertTriangle size={14} className="shrink-0 text-amber-500" />
                           <span>【{formatPeriod(dp.period)}】管理者連絡: {dp.bossNotice}</span>
                         </div>
                       )}
