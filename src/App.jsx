@@ -6,7 +6,7 @@ import {
 } from "firebase/firestore";
 import { 
   Calendar as CalendarIcon, Users, User, Settings, Check, 
-  X, ChevronLeft, ChevronRight, Shield, LogOut, Trash2, KeyRound, Info, BookOpen, AlertTriangle
+  X, ChevronLeft, ChevronRight, Shield, LogOut, Trash2, KeyRound, Info, BookOpen, AlertTriangle, Edit2
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -336,7 +336,7 @@ export default function App() {
       <main className="flex-1 w-full max-w-md mx-auto overflow-y-auto pb-20 relative">
         {activeTab === 'mySchedule' && <MyScheduleView user={user} />}
         {activeTab === 'groups' && <GroupsView user={user} activeGroup={activeGroup} setActiveGroup={setActiveGroup} />}
-        {activeTab === 'profile' && <ProfileView user={user} setShowTutorial={setShowTutorial} handleLogout={handleLogout} />}
+        {activeTab === 'profile' && <ProfileView user={user} setUser={setUser} setShowTutorial={setShowTutorial} handleLogout={handleLogout} />}
         {activeTab === 'admin' && user.username === 'Boss' && <AdminView />}
       </main>
 
@@ -807,9 +807,11 @@ function MyScheduleView({ user }) {
 
             return (
               <div key={period} className="flex flex-col gap-1">
+                {/* 修正：各時限ごとに直接紐づくすっきりとした管理者連絡表示 */}
                 {bossNoticeText && (
-                  <div className="text-[10px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md font-bold flex items-center gap-1 border border-purple-200">
-                    <AlertTriangle size={12}/> 管理者連絡: {bossNoticeText}
+                  <div className="text-[10px] bg-purple-50 text-purple-700 px-2 py-1 rounded-lg font-bold flex items-center gap-1 border border-purple-200 shadow-sm">
+                    <AlertTriangle size={12} className="shrink-0 text-purple-600"/>
+                    <span className="truncate">【管理者連絡】{bossNoticeText}</span>
                   </div>
                 )}
                 
@@ -855,6 +857,9 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [newGroupName, setNewGroupName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   
+  const [isEditingGroupName, setIsEditingGroupName] = useState(false);
+  const [editingGroupName, setEditingGroupName] = useState('');
+
   const [groupMembers, setGroupMembers] = useState([]);
   const [allSchedules, setAllSchedules] = useState([]);
   const [groupViewTab, setGroupViewTab] = useState('calendar');
@@ -914,6 +919,17 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         setShowJoin(false);
       } else { alert("無効な参加コードです"); }
     } catch(e) { alert("参加エラー"); }
+  };
+
+  const handleUpdateGroupName = async () => {
+    if (!editingGroupName.trim()) return;
+    try {
+      await updateDoc(doc(db, "groups", activeGroup.id), { name: editingGroupName.trim() });
+      setActiveGroup({ ...activeGroup, name: editingGroupName.trim() });
+      setIsEditingGroupName(false);
+    } catch (e) {
+      alert("グループ名の変更に失敗しました: " + e.message);
+    }
   };
 
   const getUserScheduleRule = (userId, date, period) => {
@@ -1272,8 +1288,31 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       <div className="flex flex-col h-full bg-gray-50">
         <div className="bg-white p-4 border-b flex items-center gap-3 sticky top-0 z-10 shadow-sm">
           <button onClick={() => setActiveGroup(null)} className="p-2 -ml-2 bg-gray-50 rounded-full hover:bg-gray-100"><ChevronLeft size={20} className="text-gray-700" /></button>
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">{activeGroup.name}</h2>
+          <div className="flex-1 min-w-0">
+            {isEditingGroupName ? (
+              <div className="flex items-center gap-2">
+                <input 
+                  type="text" 
+                  className="border border-indigo-300 px-2 py-1 rounded-lg text-sm font-bold w-full focus:ring-2 focus:ring-indigo-500"
+                  value={editingGroupName}
+                  onChange={e => setEditingGroupName(e.target.value)}
+                  autoFocus
+                />
+                <button onClick={handleUpdateGroupName} className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-bold shrink-0">保存</button>
+                <button onClick={() => setIsEditingGroupName(false)} className="bg-gray-100 text-gray-600 px-2 py-1 rounded-lg text-xs">取消</button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold text-gray-900 truncate">{activeGroup.name}</h2>
+                <button 
+                  onClick={() => { setEditingGroupName(activeGroup.name); setIsEditingGroupName(true); }}
+                  className="p-1 text-gray-400 hover:text-indigo-600 rounded-lg hover:bg-gray-100 shrink-0"
+                  title="グループ名を変更"
+                >
+                  <Edit2 size={16} />
+                </button>
+              </div>
+            )}
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs text-gray-500">メンバー {groupMembers.filter(m => m.username !== 'Boss').length}人</span>
               <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">コード: <strong className="font-mono tracking-widest">{activeGroup.joinCode}</strong></span>
@@ -1346,14 +1385,70 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 }
 
 // --- ProfileView ---
-function ProfileView({ user, setShowTutorial, handleLogout }) {
+function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [newDisplayName, setNewDisplayName] = useState(user.displayName);
+  const [nameError, setNameError] = useState('');
+
+  const handleUpdateDisplayName = async () => {
+    if (!newDisplayName.trim()) {
+      setNameError('表示名を入力してください');
+      return;
+    }
+    try {
+      await updateDoc(doc(db, "users", user.id), { displayName: newDisplayName.trim() });
+      const updatedUser = { ...user, displayName: newDisplayName.trim() };
+      setUser(updatedUser);
+      
+      const storedAuth = localStorage.getItem('wpb_bandsync_auth');
+      if (storedAuth) {
+        const parsed = JSON.parse(storedAuth);
+        parsed.userData = updatedUser;
+        localStorage.setItem('wpb_bandsync_auth', JSON.stringify(parsed));
+      }
+
+      setIsEditingName(false);
+      setNameError('');
+    } catch (e) {
+      setNameError('更新に失敗しました: ' + e.message);
+    }
+  };
+
   return (
     <div className="p-4 space-y-4">
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-indigo-500 to-purple-500 opacity-10"></div>
         <div className="w-24 h-24 bg-white border-4 border-white shadow-lg rounded-full flex items-center justify-center text-indigo-600 font-bold text-4xl mx-auto mb-4 relative z-10">{user.displayName.substring(0, 1)}</div>
-        <h2 className="text-2xl font-bold text-gray-900">{user.displayName}</h2>
-        <p className="text-sm text-gray-500 mt-1">@{user.username}</p>
+        
+        {isEditingName ? (
+          <div className="space-y-2 max-w-xs mx-auto mb-2">
+            {nameError && <p className="text-xs text-red-500">{nameError}</p>}
+            <input 
+              type="text" 
+              className="w-full border border-gray-300 p-2 rounded-xl text-sm text-center font-bold"
+              value={newDisplayName}
+              onChange={e => setNewDisplayName(e.target.value)}
+              autoFocus
+            />
+            <div className="flex gap-2 justify-center">
+              <button onClick={handleUpdateDisplayName} className="bg-indigo-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow">保存</button>
+              <button onClick={() => { setIsEditingName(false); setNewDisplayName(user.displayName); }} className="bg-gray-100 text-gray-600 px-3 py-1.5 rounded-xl text-xs">取消</button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center gap-2 mb-1">
+            <h2 className="text-2xl font-bold text-gray-900">{user.displayName}</h2>
+            <button 
+              onClick={() => setIsEditingName(true)} 
+              className="p-1 text-gray-400 hover:text-indigo-600 rounded-lg hover:bg-gray-100 transition-colors"
+              title="ニックネームを変更"
+            >
+              <Edit2 size={16} />
+            </button>
+          </div>
+        )}
+
+        <p className="text-sm text-gray-500">@{user.username}</p>
         <div className="mt-6 flex justify-center gap-2 flex-wrap">
           <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs font-medium border border-gray-200">{user.year}</span>
           {user.parts.map(part => <span key={part} className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold border border-indigo-100">{part}</span>)}
