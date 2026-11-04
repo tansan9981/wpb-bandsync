@@ -659,7 +659,6 @@ function MyScheduleView({ user }) {
         }
       });
       
-      // 修正：管理者の表示があってもカレンダーの背景色は予定に合わせた元の色にする
       let bgColor = 'bg-white border-gray-200';
       if (hasX) bgColor = 'bg-white border-gray-200';
       else if (hasTriangle) bgColor = 'bg-amber-50 border-amber-100';
@@ -795,7 +794,6 @@ function MyScheduleView({ user }) {
               return 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 shadow-sm';
             };
 
-            // 修正：時限バッジの色も自分の予定に合わせた元の色にする
             const periodBadgeColor = () => {
               if (!isActive) return 'bg-white text-gray-700 border border-gray-200 shadow-sm';
               if (activeStatus === 'studio1' || activeStatus === 'studio2' || activeText) return 'bg-indigo-100 text-indigo-800 border border-indigo-200';
@@ -868,6 +866,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [groupMembers, setGroupMembers] = useState([]);
   const [allSchedules, setAllSchedules] = useState([]);
   const [groupViewTab, setGroupViewTab] = useState('calendar');
+  const [listFilter, setListFilter] = useState('all'); // 【追加】空き日一覧の絞り込み用 ('all' | 'allOk' | 'perfectOnly')
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
 
@@ -1038,7 +1037,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         const d = new Date(currentDate.getFullYear(), currentDate.getMonth(), i);
         const status = getDayStatus(d);
         
-        // 修正：バンドのカレンダーでも紫色に変えず、予定に合わせた元の色（緑・黄色など）にする
         let bgColor = 'bg-white border border-gray-100';
         let icon = null;
 
@@ -1089,7 +1087,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
               const isAllOK = p.xMembers.length === 0 && p.triangleMembers.length === 0 && actualMembersCount > 0;
               const isTriangle = p.xMembers.length === 0 && p.triangleMembers.length > 0 && actualMembersCount > 0;
               
-              // 修正：詳細リストも紫色に変えず、元の予定に合った色（緑・黄色・グレー）にする
               let itemBg = 'bg-gray-50 border-gray-100';
               let badgeBg = 'bg-gray-200 text-gray-700';
               if (isAllOK) { itemBg = 'bg-emerald-50 border-emerald-200'; badgeBg = 'bg-emerald-200 text-emerald-800'; } 
@@ -1133,6 +1130,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     const renderAvailableList = () => {
       const today = new Date();
       const list = [];
+      const allAvailableSummary = []; // 【追加】全員空いている日・時限をひとまとめにする配列
       const actualMembersCount = groupMembers.filter(m => m.username !== 'Boss').length;
 
       if (actualMembersCount === 0) return <div className="p-8 text-center text-gray-500">メンバーがいません。</div>;
@@ -1141,6 +1139,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
         const periods = getPeriodListForDate(d);
         const dayPeriods = [];
+        const perfectOrOkPeriods = [];
 
         for (let p of periods) {
           const xMembers = [];
@@ -1170,25 +1169,127 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
           if (xCount === actualMembersCount && !bossNotice) continue; 
 
-          // 修正：管理者連絡があってもカテゴリーを紫（5）に上書きせず、元の予定に合わせた1〜4にする
           let category = 0;
           if (xCount === 0 && triCount === 0) category = 1;
           else if (xCount === 0 && triCount > 0) category = 2;
           else if (xCount > 0 && triCount === 0) category = 3;
           else if (xCount > 0 && triCount > 0) category = 4;
 
-          dayPeriods.push({ period: p, category, xMembers, triangleMembers, okMembers, bossNotice });
+          const periodData = { period: p, category, xMembers, triangleMembers, okMembers, bossNotice };
+          dayPeriods.push(periodData);
+
+          if (category === 1 || category === 2) {
+            perfectOrOkPeriods.push(periodData);
+          }
         }
 
         if (dayPeriods.length > 0) {
           list.push({ date: d, dayPeriods });
         }
+        if (perfectOrOkPeriods.length > 0) {
+          allAvailableSummary.push({ date: d, periods: perfectOrOkPeriods });
+        }
       }
 
       if (list.length === 0) return <div className="p-8 text-center text-gray-500">直近60日で1人でも参加できる枠はありません。</div>;
 
+      // フィルター適用後の詳細リストを作成
+      const filteredList = list.map(item => {
+        const filteredPeriods = item.dayPeriods.filter(dp => {
+          if (listFilter === 'perfectOnly') return dp.category === 1;
+          if (listFilter === 'allOk') return dp.category === 1 || dp.category === 2;
+          return true;
+        });
+        return { ...item, dayPeriods: filteredPeriods };
+      }).filter(item => item.dayPeriods.length > 0);
+
       return (
         <div className="p-4 space-y-4">
+          {/* 【追加】全員空いている日時をひと目で全部まとめて見れるダイジェスト枠 */}
+          <div className="bg-emerald-50/90 border-2 border-emerald-300 rounded-2xl p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-emerald-200">
+              <div className="flex items-center gap-1.5">
+                <Check size={18} className="text-emerald-600" strokeWidth={3} />
+                <h3 className="font-bold text-emerald-950 text-sm">全員空いている日時まとめ（直近60日）</h3>
+              </div>
+              <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-bold">
+                {allAvailableSummary.length}日該当
+              </span>
+            </div>
+
+            {allAvailableSummary.length === 0 ? (
+              <p className="text-xs text-emerald-800 py-2 text-center">
+                直近60日間でメンバー全員が揃う枠（×が0人の枠）はまだありません。
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {allAvailableSummary.map((sItem, sIdx) => {
+                  const dayOfWeek = ['日','月','火','水','木','金','土'][sItem.date.getDay()];
+                  const dayColor = sItem.date.getDay() === 0 ? 'text-red-600' : sItem.date.getDay() === 6 ? 'text-blue-600' : 'text-gray-800';
+                  return (
+                    <div key={sIdx} className="bg-white p-2.5 rounded-xl border border-emerald-200 flex flex-col gap-1.5 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <span className={`font-bold text-xs ${dayColor}`}>
+                          {sItem.date.getMonth() + 1}/{sItem.date.getDate()} ({dayOfWeek})
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {sItem.periods.map(p => (
+                          <div 
+                            key={p.period} 
+                            className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 border ${
+                              p.category === 1 
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                                : 'bg-blue-50 text-blue-800 border-blue-200'
+                            }`}
+                          >
+                            <span>{ p.category === 1 ? '◎' : '〇' } {formatPeriod(p.period)}</span>
+                            {p.category === 2 && (
+                              <span className="text-[9px] font-normal text-blue-700">
+                                (△:{p.triangleMembers.map(m => m.displayName).join(',')})
+                              </span>
+                            )}
+                            {p.bossNotice && (
+                              <span className="text-[9px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded border border-amber-300">
+                                ※{p.bossNotice}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="mt-2.5 pt-2 border-t border-emerald-200/60 flex items-center gap-3 text-[10px] text-emerald-900">
+              <span><strong>◎</strong>：全員が完全OK</span>
+              <span><strong>〇</strong>：全員参加可（△メンバー含む）</span>
+            </div>
+          </div>
+
+          {/* 絞り込みフィルターボタン */}
+          <div className="flex bg-gray-200/80 p-1 rounded-xl gap-1">
+            <button 
+              onClick={() => setListFilter('all')} 
+              className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${listFilter === 'all' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-600'}`}
+            >
+              すべて表示
+            </button>
+            <button 
+              onClick={() => setListFilter('allOk')} 
+              className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${listFilter === 'allOk' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-600'}`}
+            >
+              全員OK(◎・〇)のみ
+            </button>
+            <button 
+              onClick={() => setListFilter('perfectOnly')} 
+              className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${listFilter === 'perfectOnly' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-600'}`}
+            >
+              ◎全員参加のみ
+            </button>
+          </div>
+
           <div className="bg-white p-3 rounded-xl shadow-sm border text-xs space-y-1.5">
             <div className="font-bold text-gray-700 mb-2 border-b pb-1">状況の見方</div>
             <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">◎ 全員参加</span> 全員が「〇」の枠</div>
@@ -1197,62 +1298,68 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-red-100 text-red-700 font-bold">▲ 要調整</span> 欠席者がおり、参加者にも「△」を含む</div>
           </div>
 
-          {list.map((item, idx) => (
-            <div key={idx} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-              <div className="border-b border-gray-50 pb-2 mb-3">
-                <span className="text-sm text-gray-500">{item.date.getFullYear()}年</span>
-                <span className="text-lg font-bold text-gray-800 ml-1">
-                  {item.date.getMonth()+1}/{item.date.getDate()} 
-                  <span className="text-sm text-gray-500 ml-1">({['日','月','火','水','木','金','土'][item.date.getDay()]})</span>
-                </span>
-              </div>
-              <div className="space-y-3">
-                {item.dayPeriods.map(dp => {
-                  let badge = '';
-                  if (dp.category === 1) badge = <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">◎ 全員参加</span>;
-                  else if (dp.category === 2) badge = <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">〇 全員OK(△有)</span>;
-                  else if (dp.category === 3) badge = <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">△ 一部NG(残〇)</span>;
-                  else if (dp.category === 4) badge = <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">▲ 要調整(△有)</span>;
-
-                  return (
-                    <div key={dp.period} className="flex flex-col gap-1.5 p-2.5 rounded-xl border bg-gray-50 border-gray-100">
-                      <div className="flex items-center gap-3">
-                        <span className="font-bold text-gray-800 w-12 text-center text-sm">{formatPeriod(dp.period)}</span>
-                        {badge}
-                      </div>
-                      
-                      {dp.bossNotice && (
-                        <div className="text-xs font-bold text-gray-800 ml-14 bg-white p-2 rounded-lg flex items-center gap-1.5 border border-gray-200 shadow-sm">
-                          <AlertTriangle size={14} className="shrink-0 text-amber-500" />
-                          <span>【{formatPeriod(dp.period)}】管理者連絡: {dp.bossNotice}</span>
-                        </div>
-                      )}
-
-                      {(dp.xMembers.length > 0 || dp.triangleMembers.length > 0 || dp.okMembers.length > 0) && (
-                        <div className="text-[11px] ml-14 space-y-0.5 mt-1">
-                          {dp.xMembers.length > 0 && (
-                            <div className="text-red-600">
-                              <span className="font-bold">×({dp.xMembers.length}人):</span> {dp.xMembers.map(m => m.displayName).join(', ')}
-                            </div>
-                          )}
-                          {dp.triangleMembers.length > 0 && (
-                            <div className="text-amber-600">
-                              <span className="font-bold">△({dp.triangleMembers.length}人):</span> {dp.triangleMembers.map(m => m.displayName).join(', ')}
-                            </div>
-                          )}
-                          {dp.okMembers.length > 0 && (
-                            <div className="text-blue-600">
-                              <span className="font-bold">〇 臨時({dp.okMembers.length}人):</span> {dp.okMembers.map(m => m.displayName).join(', ')}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+          {filteredList.length === 0 ? (
+            <div className="p-8 text-center bg-white rounded-2xl border border-gray-100 text-gray-500 text-sm">
+              条件に一致する枠はありません。
             </div>
-          ))}
+          ) : (
+            filteredList.map((item, idx) => (
+              <div key={idx} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                <div className="border-b border-gray-50 pb-2 mb-3">
+                  <span className="text-sm text-gray-500">{item.date.getFullYear()}年</span>
+                  <span className="text-lg font-bold text-gray-800 ml-1">
+                    {item.date.getMonth()+1}/{item.date.getDate()} 
+                    <span className="text-sm text-gray-500 ml-1">({['日','月','火','水','木','金','土'][item.date.getDay()]})</span>
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {item.dayPeriods.map(dp => {
+                    let badge = '';
+                    if (dp.category === 1) badge = <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">◎ 全員参加</span>;
+                    else if (dp.category === 2) badge = <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">〇 全員OK(△有)</span>;
+                    else if (dp.category === 3) badge = <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">△ 一部NG(残〇)</span>;
+                    else if (dp.category === 4) badge = <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">▲ 要調整(△有)</span>;
+
+                    return (
+                      <div key={dp.period} className="flex flex-col gap-1.5 p-2.5 rounded-xl border bg-gray-50 border-gray-100">
+                        <div className="flex items-center gap-3">
+                          <span className="font-bold text-gray-800 w-12 text-center text-sm">{formatPeriod(dp.period)}</span>
+                          {badge}
+                        </div>
+                        
+                        {dp.bossNotice && (
+                          <div className="text-xs font-bold text-gray-800 ml-14 bg-white p-2 rounded-lg flex items-center gap-1.5 border border-gray-200 shadow-sm">
+                            <AlertTriangle size={14} className="shrink-0 text-amber-500" />
+                            <span>【{formatPeriod(dp.period)}】管理者連絡: {dp.bossNotice}</span>
+                          </div>
+                        )}
+
+                        {(dp.xMembers.length > 0 || dp.triangleMembers.length > 0 || dp.okMembers.length > 0) && (
+                          <div className="text-[11px] ml-14 space-y-0.5 mt-1">
+                            {dp.xMembers.length > 0 && (
+                              <div className="text-red-600">
+                                <span className="font-bold">×({dp.xMembers.length}人):</span> {dp.xMembers.map(m => m.displayName).join(', ')}
+                              </div>
+                            )}
+                            {dp.triangleMembers.length > 0 && (
+                              <div className="text-amber-600">
+                                <span className="font-bold">△({dp.triangleMembers.length}人):</span> {dp.triangleMembers.map(m => m.displayName).join(', ')}
+                              </div>
+                            )}
+                            {dp.okMembers.length > 0 && (
+                              <div className="text-blue-600">
+                                <span className="font-bold">〇 臨時({dp.okMembers.length}人):</span> {dp.okMembers.map(m => m.displayName).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       );
     };
