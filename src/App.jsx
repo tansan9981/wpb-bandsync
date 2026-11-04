@@ -6,7 +6,7 @@ import {
 } from "firebase/firestore";
 import { 
   Calendar as CalendarIcon, Users, User, Settings, Check, 
-  X, ChevronLeft, ChevronRight, Shield, LogOut, Trash2, KeyRound, Info, BookOpen
+  X, ChevronLeft, ChevronRight, Shield, LogOut, Trash2, KeyRound, Info, BookOpen, AlertTriangle
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -136,7 +136,7 @@ function TutorialModal({ onClose }) {
               <h3 className="text-lg font-bold text-gray-900">5. 空き日が一目でわかる！</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
                 グループ画面の「空き日一覧」タブを見ると、メンバーの予定を自動で計算してリストアップします。<br/><br/>
-                <strong>「◎ 全員参加」</strong>の日や、<strong>「△ 一部NG（誰がいないか）」</strong>がひと目で分かるので、練習日決めが圧倒的にスムーズになります！
+                <strong><span>◎ 全員参加</span></strong>の日や、<strong><span>△ 一部NG（誰がいないか）</span></strong>がひと目で分かるので、練習日決めが圧倒的にスムーズになります！
               </p>
             </div>
           )}
@@ -354,13 +354,14 @@ export default function App() {
   );
 }
 
-// --- MyScheduleView (高速化対応) ---
+// --- MyScheduleView ---
 function MyScheduleView({ user }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
   const [mySchedules, setMySchedules] = useState([]);
   
   const [inputStatus, setInputStatus] = useState('x'); 
+  const [customText, setCustomText] = useState(''); // 管理者用の手入力テキスト
   const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
@@ -378,7 +379,7 @@ function MyScheduleView({ user }) {
     const dStr = getLocalYMD(date);
     
     const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
-    if (onceRule) return { ...onceRule, status: onceRule.status || 'x', isOverride: true };
+    if (onceRule) return { ...onceRule, status: onceRule.status || 'x', text: onceRule.text || '', isOverride: true };
     
     const isValidRule = (r) => {
       if (r.startDate && r.startDate > dStr) return false;
@@ -398,18 +399,18 @@ function MyScheduleView({ user }) {
     };
 
     const weeklyRule = findValidRule('weekly', r => r.dayOfWeek === date.getDay());
-    if (weeklyRule) return { ...weeklyRule, status: weeklyRule.status || 'x', isOverride: false };
+    if (weeklyRule) return { ...weeklyRule, status: weeklyRule.status || 'x', text: weeklyRule.text || '', isOverride: false };
     
     const monthlyRule = findValidRule('monthly', r => r.dayOfMonth === date.getDate());
-    if (monthlyRule) return { ...monthlyRule, status: monthlyRule.status || 'x', isOverride: false };
+    if (monthlyRule) return { ...monthlyRule, status: monthlyRule.status || 'x', text: monthlyRule.text || '', isOverride: false };
     
     const dailyRule = findValidRule('daily', r => true);
-    if (dailyRule) return { ...dailyRule, status: dailyRule.status || 'x', isOverride: false };
+    if (dailyRule) return { ...dailyRule, status: dailyRule.status || 'x', text: dailyRule.text || '', isOverride: false };
     
     return null;
   };
 
-  const toggleSchedule = async (date, period, type, newStatus) => {
+  const toggleSchedule = async (date, period, type, newStatus, textVal = '') => {
     if (isProcessing) return;
     setIsProcessing(true);
     
@@ -439,9 +440,11 @@ function MyScheduleView({ user }) {
       
       if (activeRule) {
         const currentStatus = activeRule.status || 'x';
+        const currentText = activeRule.text || '';
         const safeStartDate = activeRule.startDate || '2000-01-01';
         
-        if (currentStatus === newStatus || (!activeRule.status && newStatus === 'x')) {
+        // 同じステータスかつテキストも同じなら解除
+        if ((currentStatus === newStatus && currentText === textVal) || (!activeRule.status && newStatus === 'x' && !textVal)) {
             if (type === 'once' || safeStartDate === dStr) {
                 setMySchedules(newSchedules.filter(r => r.id !== activeRule.id));
                 await deleteDoc(doc(db, "schedules", activeRule.id));
@@ -453,13 +456,13 @@ function MyScheduleView({ user }) {
             }
         } else {
             if (type === 'once' || safeStartDate === dStr) {
-                await updateDoc(doc(db, "schedules", activeRule.id), { status: newStatus });
+                await updateDoc(doc(db, "schedules", activeRule.id), { status: newStatus, text: textVal });
                 const idx = newSchedules.findIndex(r => r.id === activeRule.id);
-                if(idx >= 0) newSchedules[idx] = { ...newSchedules[idx], status: newStatus };
+                if(idx >= 0) newSchedules[idx] = { ...newSchedules[idx], status: newStatus, text: textVal };
                 setMySchedules(newSchedules);
             } else {
                 await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
-                let newRule = { userId: user.id, period, type, status: newStatus, startDate: dStr };
+                let newRule = { userId: user.id, period, type, status: newStatus, text: textVal, startDate: dStr };
                 if (type === 'weekly') newRule.dayOfWeek = date.getDay();
                 if (type === 'monthly') newRule.dayOfMonth = date.getDate();
                 
@@ -470,7 +473,7 @@ function MyScheduleView({ user }) {
             }
         }
       } else {
-        let newRule = { userId: user.id, period, type, status: newStatus, startDate: dStr };
+        let newRule = { userId: user.id, period, type, status: newStatus, text: textVal, startDate: dStr };
         if (type === 'once') newRule.date = dStr;
         if (type === 'weekly') newRule.dayOfWeek = date.getDay();
         if (type === 'monthly') newRule.dayOfMonth = date.getDate();
@@ -546,15 +549,15 @@ function MyScheduleView({ user }) {
              const safeStartDate = activeRule.startDate || '2000-01-01';
              if (currentStatus !== inputStatus) {
                  if (type === 'once' || safeStartDate === dStr) {
-                     await updateDoc(doc(db, "schedules", activeRule.id), { status: inputStatus });
+                     await updateDoc(doc(db, "schedules", activeRule.id), { status: inputStatus, text: '' });
                      const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
-                     if(idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], status: inputStatus };
+                     if(idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], status: inputStatus, text: '' };
                  } else {
                      await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
                      const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
                      if(idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], endDate: dStr };
                      
-                     let newRule = { userId: user.id, period, type, status: inputStatus, startDate: dStr };
+                     let newRule = { userId: user.id, period, type, status: inputStatus, text: '', startDate: dStr };
                      if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
                      if (type === 'monthly') newRule.dayOfMonth = selectedDate.getDate();
                      
@@ -563,7 +566,7 @@ function MyScheduleView({ user }) {
                  }
              }
           } else {
-             let newRule = { userId: user.id, period, type, status: inputStatus, startDate: dStr };
+             let newRule = { userId: user.id, period, type, status: inputStatus, text: '', startDate: dStr };
              if (type === 'once') newRule.date = dStr;
              if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
              if (type === 'monthly') newRule.dayOfMonth = selectedDate.getDate();
@@ -596,18 +599,21 @@ function MyScheduleView({ user }) {
       let hasX = false;
       let hasTriangle = false;
       let hasOk = false;
+      let hasStudioOrText = false; // 管理者のスタジオ不可・テキスト表示用
       
       periods.forEach(p => {
         const rule = getScheduleRule(d, p);
         if (rule) {
+          if (rule.status === 'studio1' || rule.status === 'studio2' || rule.text) hasStudioOrText = true;
           if (rule.status === 'ok') hasOk = true;
           else if (rule.status === 'triangle') hasTriangle = true;
-          else hasX = true;
+          else if (rule.status === 'x') hasX = true;
         }
       });
       
       let bgColor = 'bg-white border-gray-200';
-      if (hasX) bgColor = 'bg-white border-gray-200';
+      if (hasStudioOrText) bgColor = 'bg-purple-50 border-purple-200';
+      else if (hasX) bgColor = 'bg-white border-gray-200';
       else if (hasTriangle) bgColor = 'bg-amber-50 border-amber-100';
       else if (hasOk) bgColor = 'bg-blue-50 border-blue-100';
       else bgColor = 'bg-indigo-50 border-indigo-100';
@@ -616,7 +622,8 @@ function MyScheduleView({ user }) {
         <div key={i} onClick={() => setSelectedDate(d)} className="p-1 cursor-pointer">
           <div className={`h-12 rounded-xl flex flex-col items-center justify-center border ${bgColor} ${selectedDate?.toDateString() === d.toDateString() ? 'ring-2 ring-indigo-500' : ''}`}>
             <span className={`text-sm font-medium ${d.getDay()===0 ? 'text-red-500' : d.getDay()===6 ? 'text-blue-500' : 'text-gray-700'}`}>{i}</span>
-            <div className="flex gap-0.5 mt-0.5 text-[12px] leading-none font-bold">
+            <div className="flex gap-0.5 mt-0.5 text-[10px] leading-none font-bold">
+              {hasStudioOrText && <span className="text-purple-600">管</span>}
               {hasX && <span className="text-red-500">×</span>}
               {!hasX && hasTriangle && <span className="text-amber-500">△</span>}
               {!hasX && !hasTriangle && hasOk && <span className="text-blue-500">〇</span>}
@@ -644,6 +651,7 @@ function MyScheduleView({ user }) {
     if (!selectedDate) return null;
     const periods = getPeriodListForDate(selectedDate);
     const dStr = getLocalYMD(selectedDate);
+    const isBoss = user.username === 'Boss';
 
     return (
       <div className={`p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-4 animate-in slide-in-from-bottom-4 transition-opacity ${isProcessing ? 'opacity-50 pointer-events-none' : ''}`}>
@@ -652,50 +660,52 @@ function MyScheduleView({ user }) {
           <button onClick={() => setSelectedDate(null)} className="p-1 bg-gray-100 rounded-full hover:bg-gray-200"><X size={16}/></button>
         </div>
         
+        {/* モード選択ボタン（Bossの場合は専用オプションを含む） */}
         <div className="flex gap-1 mb-2 bg-gray-100 p-1 rounded-xl">
           <button onClick={() => setInputStatus('x')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${inputStatus === 'x' ? 'bg-red-500 text-white shadow' : 'text-gray-500 hover:bg-gray-200'}`}>× 行けない</button>
           <button onClick={() => setInputStatus('triangle')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${inputStatus === 'triangle' ? 'bg-amber-500 text-white shadow' : 'text-gray-500 hover:bg-gray-200'}`}>△ 微妙</button>
           <button onClick={() => setInputStatus('ok')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${inputStatus === 'ok' ? 'bg-blue-500 text-white shadow' : 'text-gray-500 hover:bg-gray-200'}`}>〇 臨時OK</button>
         </div>
+
+        {/* Boss専用の追加選択肢 */}
+        {isBoss && (
+          <div className="grid grid-cols-2 gap-1 mb-3">
+            <button onClick={() => setInputStatus('studio1')} className={`py-2 text-xs font-bold rounded-lg transition-colors border ${inputStatus === 'studio1' ? 'bg-purple-600 text-white border-purple-700 shadow' : 'bg-purple-50 text-purple-700 border-purple-200'}`}>1スタジオ不可</button>
+            <button onClick={() => setInputStatus('studio2')} className={`py-2 text-xs font-bold rounded-lg transition-colors border ${inputStatus === 'studio2' ? 'bg-purple-600 text-white border-purple-700 shadow' : 'bg-purple-50 text-purple-700 border-purple-200'}`}>2スタジオ不可</button>
+          </div>
+        )}
+
+        {/* Boss専用の手入力テキストフィールド */}
+        {isBoss && (
+          <div className="mb-4">
+            <label className="block text-[10px] font-bold text-gray-700 mb-1">管理者手入力（各限に文字を表示）</label>
+            <input 
+              type="text" 
+              placeholder="例: 機材メンテナンス 等" 
+              className="w-full border border-purple-200 bg-purple-50/50 p-2 rounded-xl text-xs focus:ring-2 focus:ring-purple-500" 
+              value={customText} 
+              onChange={e => setCustomText(e.target.value)}
+            />
+          </div>
+        )}
+
         <p className="text-[10px] text-gray-500 mb-4 bg-gray-50 p-2 rounded-lg leading-relaxed">
           上のボタンでモードを選択後、下の枠をタップしてください。<br/>
-          <span className="text-blue-600 font-bold">「〇 臨時OK」</span>は、<span className="font-bold underline">「この日」のみ選択可能</span>です。繰り返しの予定を特定の週だけ上書きする時に使います。
+          {isBoss && <span className="text-purple-700 font-bold">管理者権限：</span>}
+          <span className="text-blue-600 font-bold">「〇 臨時OK」</span>は「この日」のみ選択可能です。
         </p>
 
         <div className="mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
           <div className="text-xs font-bold text-indigo-800 mb-2 flex items-center justify-between">
             <span>この日を一括で設定（全日）</span>
-            <span className={`text-[10px] px-2 py-0.5 rounded-full text-white ${inputStatus === 'x' ? 'bg-red-500' : inputStatus === 'triangle' ? 'bg-amber-500' : 'bg-blue-500'}`}>
-              選択中: {inputStatus === 'x' ? '×' : inputStatus === 'triangle' ? '△' : '〇'}
+            <span className={`text-[10px] px-2 py-0.5 rounded-full text-white ${inputStatus === 'x' ? 'bg-red-500' : inputStatus === 'triangle' ? 'bg-amber-500' : inputStatus === 'ok' ? 'bg-blue-500' : 'bg-purple-600'}`}>
+              選択中: {inputStatus === 'x' ? '×' : inputStatus === 'triangle' ? '△' : inputStatus === 'ok' ? '〇' : inputStatus === 'studio1' ? '1スタ不可' : '2スタ不可'}
             </span>
           </div>
           <div className="flex gap-1">
             {['once:この日', 'weekly:毎週', 'monthly:毎月', 'daily:毎日'].map(t => {
               const [type, label] = t.split(':');
-              
-              const isDisabled = inputStatus === 'ok' && type !== 'once';
-              
-              const isAllSetForThisType = periods.every(period => {
-                const rulesOfSameType = mySchedules.filter(r => r.period === period && r.type === type);
-                let validRule = null;
-                if (type === 'once') {
-                    validRule = rulesOfSameType.find(r => r.date === dStr);
-                } else {
-                    const condition = type === 'weekly' ? (r => r.dayOfWeek === selectedDate.getDay()) :
-                                      type === 'monthly' ? (r => r.dayOfMonth === selectedDate.getDate()) :
-                                      (r => true);
-                    const validRules = rulesOfSameType.filter(r => condition(r) && (!r.startDate || r.startDate <= dStr) && (!r.endDate || r.endDate > dStr));
-                    if (validRules.length > 0) {
-                        validRules.sort((a, b) => {
-                          const sa = a.startDate || '1970-01-01';
-                          const sb = b.startDate || '1970-01-01';
-                          return sa < sb ? 1 : (sa > sb ? -1 : 0);
-                        });
-                        validRule = validRules[0];
-                    }
-                }
-                return validRule && (validRule.status === inputStatus || (!validRule.status && inputStatus === 'x'));
-              });
+              const isDisabled = (inputStatus === 'ok' || inputStatus === 'studio1' || inputStatus === 'studio2') && type !== 'once';
 
               return (
                 <button 
@@ -704,9 +714,7 @@ function MyScheduleView({ user }) {
                   disabled={isDisabled}
                   className={`flex-1 py-2 text-[10px] font-bold rounded-lg transition-colors border ${
                     isDisabled ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-50' :
-                    isAllSetForThisType 
-                      ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm' 
-                      : 'bg-white border-indigo-200 text-indigo-700 hover:bg-indigo-50'
+                    'bg-white border-indigo-200 text-indigo-700 hover:bg-indigo-50'
                   }`}
                 >
                   {label}
@@ -722,9 +730,11 @@ function MyScheduleView({ user }) {
             const isActive = !!rule;
             const activeType = rule ? rule.type : null;
             const activeStatus = rule ? (rule.status || 'x') : null;
+            const activeText = rule ? rule.text : '';
             
             const btnColor = (type) => {
               if (isActive && activeType === type) {
+                if (activeStatus === 'studio1' || activeStatus === 'studio2') return 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-200';
                 if (activeStatus === 'x') return 'bg-red-500 text-white shadow-sm ring-2 ring-red-200';
                 if (activeStatus === 'triangle') return 'bg-amber-500 text-white shadow-sm ring-2 ring-amber-200';
                 if (activeStatus === 'ok') return 'bg-blue-500 text-white shadow-sm ring-2 ring-blue-200';
@@ -735,6 +745,7 @@ function MyScheduleView({ user }) {
 
             const periodBadgeColor = () => {
               if (!isActive) return 'bg-gray-100 text-gray-700';
+              if (activeStatus === 'studio1' || activeStatus === 'studio2' || activeText) return 'bg-purple-100 text-purple-800';
               if (activeStatus === 'x') return 'bg-red-100 text-red-700';
               if (activeStatus === 'triangle') return 'bg-amber-100 text-amber-700';
               return 'bg-blue-100 text-blue-700';
@@ -742,21 +753,20 @@ function MyScheduleView({ user }) {
 
             return (
               <div key={period} className="flex items-center gap-2">
-                <div className={`w-14 text-center font-bold py-2 rounded-xl text-xs flex flex-col items-center justify-center ${periodBadgeColor()}`}>
+                <div className={`w-16 text-center font-bold py-2 rounded-xl text-xs flex flex-col items-center justify-center ${periodBadgeColor()}`}>
                   <span>{formatPeriod(period)}</span>
-                  {isActive && <span className="text-[8px] font-normal opacity-80 -mt-0.5">{activeType === 'once' ? 'この日' : activeType === 'weekly' ? '毎週' : activeType === 'monthly' ? '毎月' : '毎日'}</span>}
+                  {isActive && <span className="text-[7px] font-normal opacity-90 -mt-0.5 truncate max-w-[50px]">{activeText || (activeType === 'once' ? 'この日' : activeType === 'weekly' ? '毎週' : activeType === 'monthly' ? '毎月' : '毎日')}</span>}
                 </div>
 
                 <div className="flex-1 grid grid-cols-4 gap-1">
                   {['once:この日', 'weekly:毎週', 'monthly:毎月', 'daily:毎日'].map(t => {
                     const [type, label] = t.split(':');
-                    
-                    const isDisabledByMode = inputStatus === 'ok' && type !== 'once';
+                    const isDisabledByMode = (inputStatus === 'ok' || inputStatus === 'studio1' || inputStatus === 'studio2') && type !== 'once';
 
                     return (
                       <button 
                         key={type} 
-                        onClick={() => toggleSchedule(selectedDate, period, type, inputStatus)} 
+                        onClick={() => toggleSchedule(selectedDate, period, type, inputStatus, isBoss ? customText : '')} 
                         disabled={isDisabledByMode} 
                         className={`py-2 text-[10px] font-medium rounded-xl transition-all ${btnColor(type)}`}
                       >
@@ -808,7 +818,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         
         const snapS = await getDocs(collection(db, "schedules"));
         const allS = snapS.docs.map(d => ({ id: d.id, ...d.data() }));
-        setAllSchedules(allS.filter(s => activeGroup.members.includes(s.userId)));
+        setAllSchedules(allS);
       };
       fetchDetails();
     }
@@ -849,7 +859,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     const dStr = getLocalYMD(date);
     
     const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
-    if (onceRule) return { ...onceRule, status: onceRule.status || 'x' };
+    if (onceRule) return { ...onceRule, status: onceRule.status || 'x', text: onceRule.text || '' };
     
     const isValidRule = (r) => {
       if (r.startDate && r.startDate > dStr) return false;
@@ -869,16 +879,19 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     };
 
     const weeklyRule = findValidRule('weekly', r => r.dayOfWeek === date.getDay());
-    if (weeklyRule) return { ...weeklyRule, status: weeklyRule.status || 'x' };
+    if (weeklyRule) return { ...weeklyRule, status: weeklyRule.status || 'x', text: weeklyRule.text || '' };
     
     const monthlyRule = findValidRule('monthly', r => r.dayOfMonth === date.getDate());
-    if (monthlyRule) return { ...monthlyRule, status: monthlyRule.status || 'x' };
+    if (monthlyRule) return { ...monthlyRule, status: monthlyRule.status || 'x', text: monthlyRule.text || '' };
     
     const dailyRule = findValidRule('daily', r => true);
-    if (dailyRule) return { ...dailyRule, status: dailyRule.status || 'x' };
+    if (dailyRule) return { ...dailyRule, status: dailyRule.status || 'x', text: dailyRule.text || '' };
     
     return null;
   };
+
+  // BossのユーザーIDを特定するためのヘルパー
+  const bossUser = groupMembers.find(m => m.username === 'Boss');
 
   const getDayStatus = (date) => {
     if(groupMembers.length === 0) return { dayStatus: 'ng', detail: [] };
@@ -891,16 +904,24 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       const xMembers = [];
       const triangleMembers = [];
       const okMembers = [];
+      let bossNotice = null; // Bossの特殊設定（スタジオ不可や手入力）を格納
       
       groupMembers.forEach(m => {
         const rule = getUserScheduleRule(m.id, date, p);
         if (rule) {
+          if (m.username === 'Boss') {
+            if (rule.status === 'studio1') bossNotice = '1スタジオ使用不可';
+            else if (rule.status === 'studio2') bossNotice = '2スタジオ使用不可';
+            else if (rule.text) bossNotice = rule.text;
+          }
+
           if (rule.status === 'ok') okMembers.push(m);
           else if (rule.status === 'triangle') triangleMembers.push(m);
-          else xMembers.push(m);
+          else if (rule.status === 'x') xMembers.push(m);
         }
       });
-      detail.push({ period: p, xMembers, triangleMembers, okMembers });
+
+      detail.push({ period: p, xMembers, triangleMembers, okMembers, bossNotice });
       
       if (xMembers.length === 0 && triangleMembers.length === 0) isAnyPeriodAllOK = true;
       else if (xMembers.length === 0 && triangleMembers.length > 0) isAnyPeriodTriangleOnly = true;
@@ -931,7 +952,13 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         
         let bgColor = 'bg-white border border-gray-100';
         let icon = null;
-        if (status.dayStatus === 'ok') {
+
+        // Bossの通知がある場合はカレンダーでも紫色のハイライト
+        const hasBossNotice = status.detail.some(p => p.bossNotice);
+        if (hasBossNotice) {
+          bgColor = 'bg-purple-50 border border-purple-300 shadow-sm';
+          icon = <span className="text-purple-600 text-[10px] font-bold mt-1">管</span>;
+        } else if (status.dayStatus === 'ok') {
           bgColor = 'bg-emerald-50 border border-emerald-300 shadow-sm';
           icon = <Check size={12} className="text-emerald-500 mt-1" strokeWidth={3} />;
         } else if (status.dayStatus === 'triangle') {
@@ -979,13 +1006,21 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
               
               let itemBg = 'bg-gray-50 border-gray-100';
               let badgeBg = 'bg-gray-200 text-gray-700';
-              if (isAllOK) { itemBg = 'bg-emerald-50 border-emerald-200'; badgeBg = 'bg-emerald-200 text-emerald-800'; } 
+              if (p.bossNotice) { itemBg = 'bg-purple-50 border-purple-200'; badgeBg = 'bg-purple-200 text-purple-800'; }
+              else if (isAllOK) { itemBg = 'bg-emerald-50 border-emerald-200'; badgeBg = 'bg-emerald-200 text-emerald-800'; } 
               else if (isTriangle) { itemBg = 'bg-amber-50 border-amber-200'; badgeBg = 'bg-amber-200 text-amber-800'; }
 
               return (
                 <div key={p.period} className={`p-3 rounded-xl flex items-center gap-3 border ${itemBg}`}>
                   <div className={`w-14 text-center font-bold text-xs py-1.5 rounded-lg ${badgeBg}`}>{formatPeriod(p.period)}</div>
                   <div className="flex-1">
+                    {/* 管理者通知がある場合は最優先で大きく表示 */}
+                    {p.bossNotice && (
+                      <div className="text-xs font-bold text-purple-700 flex items-center gap-1 mb-1 bg-purple-100/60 p-1.5 rounded-lg">
+                        <AlertTriangle size={14} className="shrink-0" />
+                        <span>管理者連絡: {p.bossNotice}</span>
+                      </div>
+                    )}
                     {isAllOK ? (
                       <div>
                         <span className="text-sm font-bold text-emerald-600 flex items-center gap-1"><Check size={16} /> 全員空いています！</span>
@@ -1027,28 +1062,36 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           const xMembers = [];
           const triangleMembers = [];
           const okMembers = [];
+          let bossNotice = null;
           
           groupMembers.forEach(m => {
             const rule = getUserScheduleRule(m.id, d, p);
             if (rule) {
+              if (m.username === 'Boss') {
+                if (rule.status === 'studio1') bossNotice = '1スタジオ不可';
+                else if (rule.status === 'studio2') bossNotice = '2スタジオ不可';
+                else if (rule.text) bossNotice = rule.text;
+              }
+
               if (rule.status === 'ok') okMembers.push(m);
               else if (rule.status === 'triangle') triangleMembers.push(m);
-              else xMembers.push(m);
+              else if (rule.status === 'x') xMembers.push(m);
             }
           });
 
           const xCount = xMembers.length;
           const triCount = triangleMembers.length;
 
-          if (xCount === totalMembers) continue; 
+          if (xCount === totalMembers && !bossNotice) continue; 
 
           let category = 0;
-          if (xCount === 0 && triCount === 0) category = 1;
+          if (bossNotice) category = 5; // 管理者通知あり
+          else if (xCount === 0 && triCount === 0) category = 1;
           else if (xCount === 0 && triCount > 0) category = 2;
           else if (xCount > 0 && triCount === 0) category = 3;
           else if (xCount > 0 && triCount > 0) category = 4;
 
-          dayPeriods.push({ period: p, category, xMembers, triangleMembers, okMembers });
+          dayPeriods.push({ period: p, category, xMembers, triangleMembers, okMembers, bossNotice });
         }
 
         if (dayPeriods.length > 0) {
@@ -1062,10 +1105,10 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         <div className="p-4 space-y-4">
           <div className="bg-white p-3 rounded-xl shadow-sm border text-xs space-y-1.5">
             <div className="font-bold text-gray-700 mb-2 border-b pb-1">状況の見方</div>
+            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-purple-100 text-purple-700 font-bold">管 管理者連絡</span> スタジオ不可や手入力事項</div>
             <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">◎ 全員参加</span> 全員が「〇」の枠</div>
             <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">〇 全員OK</span> 全員参加できるが「△」を含む</div>
             <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-bold">△ 一部NG</span> 欠席者がいるが、参加者は全員「〇」</div>
-            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-red-100 text-red-700 font-bold">▲ 要調整</span> 欠席者がおり、参加者にも「△」を含む</div>
           </div>
 
           {list.map((item, idx) => (
@@ -1080,10 +1123,11 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
               <div className="space-y-3">
                 {item.dayPeriods.map(dp => {
                   let badge = '';
-                  if (dp.category === 1) badge = <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">◎ 全員参加</span>;
-                  if (dp.category === 2) badge = <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">〇 全員OK(△有)</span>;
-                  if (dp.category === 3) badge = <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">△ 一部NG(残〇)</span>;
-                  if (dp.category === 4) badge = <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">▲ 要調整(△有)</span>;
+                  if (dp.category === 5) badge = <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0 flex items-center gap-1"><AlertTriangle size={12}/> 管理者連絡有</span>;
+                  else if (dp.category === 1) badge = <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">◎ 全員参加</span>;
+                  else if (dp.category === 2) badge = <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">〇 全員OK(△有)</span>;
+                  else if (dp.category === 3) badge = <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">△ 一部NG(残〇)</span>;
+                  else if (dp.category === 4) badge = <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">▲ 要調整(△有)</span>;
 
                   return (
                     <div key={dp.period} className="flex flex-col gap-1.5 p-2.5 bg-gray-50 rounded-xl border border-gray-100">
@@ -1091,6 +1135,15 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                         <span className="font-bold text-gray-800 w-12 text-center text-sm">{formatPeriod(dp.period)}</span>
                         {badge}
                       </div>
+                      
+                      {/* 管理者連絡がある場合は強調 */}
+                      {dp.bossNotice && (
+                        <div className="text-xs font-bold text-purple-700 ml-14 bg-purple-100/70 p-2 rounded-lg flex items-center gap-1.5">
+                          <AlertTriangle size={14} className="shrink-0" />
+                          <span>管理者連絡: {dp.bossNotice}</span>
+                        </div>
+                      )}
+
                       {(dp.xMembers.length > 0 || dp.triangleMembers.length > 0 || dp.okMembers.length > 0) && (
                         <div className="text-[11px] ml-14 space-y-0.5 mt-1">
                           {dp.xMembers.length > 0 && (
