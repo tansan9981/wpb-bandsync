@@ -31,7 +31,6 @@ try {
 // --- Shared Logic ---
 const generateJoinCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
-// 【変更】日曜日(0)以外はすべて5, 6限を追加（土曜日も6限まで対応）
 const getPeriodListForDate = (date) => {
   const day = date.getDay();
   const base = ['1', '2', 'lunch', '3', '4'];
@@ -124,7 +123,7 @@ function TutorialModal({ onClose }) {
               </div>
               <h3 className="text-lg font-bold text-gray-900">4. グループに参加しよう</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                「グループ」タブから、自分が所属するバンドのグループを<strong>「新規作成」</strong>するか、リーダーから教わった<strong>「6桁の参加コード」</strong>を入力してグループに参加します。
+                「グループ」タブから、自分が所属するバンドのグループを<strong>「新規作成」</strong>するか、リーダーから教わった<strong>6桁の参加コード</strong>を入力してグループに参加します。
               </p>
             </div>
           )}
@@ -200,7 +199,6 @@ export default function App() {
     if (!db) { setAuthError('データベースに接続できません。'); return; }
     
     if (isLogin) {
-      // 【変更】ログイン（再ログイン）時はチュートリアルを自動表示しない
       try {
         const q = query(collection(db, "users"), where("username", "==", authForm.username), where("password", "==", authForm.password));
         const querySnapshot = await getDocs(q);
@@ -216,7 +214,6 @@ export default function App() {
         }
       } catch (err) { setAuthError('エラーが発生しました: ' + err.message); }
     } else {
-      // 新規登録時のみチュートリアルを表示する
       if (!authForm.username || !authForm.password || !authForm.displayName) { setAuthError('必須項目を入力してください。'); return; }
       if (authForm.password !== authForm.confirmPassword) { setAuthError('パスワードと確認用パスワードが一致しません。'); return; }
 
@@ -357,7 +354,7 @@ export default function App() {
   );
 }
 
-// --- MyScheduleView ---
+// --- MyScheduleView (高速化対応) ---
 function MyScheduleView({ user }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
@@ -446,29 +443,30 @@ function MyScheduleView({ user }) {
         
         if (currentStatus === newStatus || (!activeRule.status && newStatus === 'x')) {
             if (type === 'once' || safeStartDate === dStr) {
+                setMySchedules(newSchedules.filter(r => r.id !== activeRule.id));
                 await deleteDoc(doc(db, "schedules", activeRule.id));
-                newSchedules = newSchedules.filter(r => r.id !== activeRule.id);
             } else {
                 await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
                 const idx = newSchedules.findIndex(r => r.id === activeRule.id);
                 if(idx >= 0) newSchedules[idx] = { ...newSchedules[idx], endDate: dStr };
+                setMySchedules(newSchedules);
             }
         } else {
             if (type === 'once' || safeStartDate === dStr) {
                 await updateDoc(doc(db, "schedules", activeRule.id), { status: newStatus });
                 const idx = newSchedules.findIndex(r => r.id === activeRule.id);
                 if(idx >= 0) newSchedules[idx] = { ...newSchedules[idx], status: newStatus };
+                setMySchedules(newSchedules);
             } else {
                 await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
-                const idx = newSchedules.findIndex(r => r.id === activeRule.id);
-                if(idx >= 0) newSchedules[idx] = { ...newSchedules[idx], endDate: dStr };
-                
                 let newRule = { userId: user.id, period, type, status: newStatus, startDate: dStr };
                 if (type === 'weekly') newRule.dayOfWeek = date.getDay();
                 if (type === 'monthly') newRule.dayOfMonth = date.getDate();
                 
                 const docRef = await addDoc(collection(db, "schedules"), newRule);
+                newSchedules = newSchedules.map(r => r.id === activeRule.id ? { ...r, endDate: dStr } : r);
                 newSchedules.push({ id: docRef.id, ...newRule });
+                setMySchedules(newSchedules);
             }
         }
       } else {
@@ -477,10 +475,12 @@ function MyScheduleView({ user }) {
         if (type === 'weekly') newRule.dayOfWeek = date.getDay();
         if (type === 'monthly') newRule.dayOfMonth = date.getDate();
         
+        const tempId = 'temp_' + Date.now();
+        setMySchedules([...newSchedules, { id: tempId, ...newRule }]);
+        
         const docRef = await addDoc(collection(db, "schedules"), newRule);
-        newSchedules.push({ id: docRef.id, ...newRule });
+        setMySchedules(prev => prev.map(r => r.id === tempId ? { id: docRef.id, ...newRule } : r));
       }
-      setMySchedules(newSchedules);
     } catch(e) { 
       alert("更新エラー: " + e.message); 
     } finally {
