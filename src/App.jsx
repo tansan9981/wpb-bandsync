@@ -528,6 +528,13 @@ function MyScheduleView({ user }) {
         const docRef = await addDoc(collection(db, "schedules"), newRule);
         setMySchedules(prev => prev.map(r => r.id === tempId ? { id: docRef.id, ...newRule } : r));
       }
+      
+      // 自分がBossの場合はbossSchedulesにも即時反映する
+      if (user.username === 'Boss') {
+        const bossQ = query(collection(db, "schedules"), where("userId", "==", user.id));
+        const bossSnap = await getDocs(bossQ);
+        setBossSchedules(bossSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }
     } catch(e) { 
       alert("更新エラー: " + e.message); 
     } finally {
@@ -769,7 +776,8 @@ function MyScheduleView({ user }) {
           </div>
         </div>
 
-        <div className="space-y-3 border-t border-gray-100 pt-3">
+        {/* 修正：各時限を独立したカード枠で囲み、どの時限の管理者連絡かひと目でわかるように変更 */}
+        <div className="space-y-2.5 border-t border-gray-100 pt-3">
           {periods.map(period => {
             const rule = getScheduleRule(selectedDate, period);
             const bossRule = getBossRule(selectedDate, period);
@@ -781,8 +789,8 @@ function MyScheduleView({ user }) {
 
             let bossNoticeText = '';
             if (bossRule) {
-              if (bossRule.status === 'studio1') bossNoticeText = '1スタ不可';
-              else if (bossRule.status === 'studio2') bossNoticeText = '2スタ不可';
+              if (bossRule.status === 'studio1') bossNoticeText = '1スタジオ使用不可';
+              else if (bossRule.status === 'studio2') bossNoticeText = '2スタジオ使用不可';
               else if (bossRule.text) bossNoticeText = bossRule.text;
             }
             
@@ -793,32 +801,47 @@ function MyScheduleView({ user }) {
                 if (activeStatus === 'triangle') return 'bg-amber-500 text-white shadow-sm ring-2 ring-amber-200';
                 if (activeStatus === 'ok') return 'bg-blue-500 text-white shadow-sm ring-2 ring-blue-200';
               }
-              if (isActive) return 'bg-gray-100 text-gray-400 opacity-50';
-              return 'bg-gray-100 text-gray-600 hover:bg-gray-200';
+              if (isActive) return 'bg-white/60 text-gray-400 border border-gray-200/60 opacity-60';
+              return 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 shadow-sm';
             };
 
             const periodBadgeColor = () => {
-              if (!isActive) return 'bg-gray-100 text-gray-700';
-              if (activeStatus === 'studio1' || activeStatus === 'studio2' || activeText) return 'bg-purple-100 text-purple-800';
-              if (activeStatus === 'x') return 'bg-red-100 text-red-700';
-              if (activeStatus === 'triangle') return 'bg-amber-100 text-amber-700';
-              return 'bg-blue-100 text-blue-700';
+              if (!isActive) {
+                return bossNoticeText 
+                  ? 'bg-purple-200/80 text-purple-900 border border-purple-300' 
+                  : 'bg-white text-gray-700 border border-gray-200 shadow-sm';
+              }
+              if (activeStatus === 'studio1' || activeStatus === 'studio2' || activeText) return 'bg-purple-600 text-white shadow-sm';
+              if (activeStatus === 'x') return 'bg-red-100 text-red-700 border border-red-200';
+              if (activeStatus === 'triangle') return 'bg-amber-100 text-amber-700 border border-amber-200';
+              return 'bg-blue-100 text-blue-700 border border-blue-200';
             };
 
             return (
-              <div key={period} className="flex flex-col gap-1">
-                {/* 修正：各時限ごとに直接紐づくすっきりとした管理者連絡表示 */}
+              <div 
+                key={period} 
+                className={`p-2.5 rounded-2xl border transition-all ${
+                  bossNoticeText 
+                    ? 'bg-purple-50/70 border-purple-300 shadow-sm' 
+                    : 'bg-gray-50/70 border-gray-200/80'
+                }`}
+              >
+                {/* 管理者連絡がある場合はその時限の枠内のトップに時限名入りで明記 */}
                 {bossNoticeText && (
-                  <div className="text-[10px] bg-purple-50 text-purple-700 px-2 py-1 rounded-lg font-bold flex items-center gap-1 border border-purple-200 shadow-sm">
-                    <AlertTriangle size={12} className="shrink-0 text-purple-600"/>
-                    <span className="truncate">【管理者連絡】{bossNoticeText}</span>
+                  <div className="mb-2 px-2.5 py-1.5 bg-purple-600 text-white rounded-xl text-[11px] font-bold flex items-center gap-1.5 shadow-sm">
+                    <AlertTriangle size={14} className="shrink-0 text-amber-300" />
+                    <span>【{formatPeriod(period)}】管理者連絡: {bossNoticeText}</span>
                   </div>
                 )}
                 
                 <div className="flex items-center gap-2">
-                  <div className={`w-16 text-center font-bold py-2 rounded-xl text-xs flex flex-col items-center justify-center ${periodBadgeColor()}`}>
+                  <div className={`w-16 text-center font-bold py-2 rounded-xl text-xs flex flex-col items-center justify-center shrink-0 ${periodBadgeColor()}`}>
                     <span>{formatPeriod(period)}</span>
-                    {isActive && <span className="text-[7px] font-normal opacity-90 -mt-0.5 truncate max-w-[50px]">{activeText || (activeType === 'once' ? 'この日' : activeType === 'weekly' ? '毎週' : activeType === 'monthly' ? '毎月' : '毎日')}</span>}
+                    {isActive && (
+                      <span className="text-[8px] font-normal opacity-90 -mt-0.5 truncate max-w-[54px]">
+                        {activeText || (activeType === 'once' ? 'この日' : activeType === 'weekly' ? '毎週' : activeType === 'monthly' ? '毎月' : '毎日')}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex-1 grid grid-cols-4 gap-1">
@@ -831,7 +854,7 @@ function MyScheduleView({ user }) {
                           key={type} 
                           onClick={() => toggleSchedule(selectedDate, period, type, inputStatus, isBoss ? customText : '')} 
                           disabled={isDisabledByMode} 
-                          className={`py-2 text-[10px] font-medium rounded-xl transition-all ${btnColor(type)}`}
+                          className={`py-2 text-[10px] font-bold rounded-xl transition-all ${btnColor(type)}`}
                         >
                           {label}
                         </button>
@@ -924,8 +947,10 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   const handleUpdateGroupName = async () => {
     if (!editingGroupName.trim()) return;
     try {
-      await updateDoc(doc(db, "groups", activeGroup.id), { name: editingGroupName.trim() });
-      setActiveGroup({ ...activeGroup, name: editingGroupName.trim() });
+      const trimmed = editingGroupName.trim();
+      await updateDoc(doc(db, "groups", activeGroup.id), { name: trimmed });
+      setActiveGroup({ ...activeGroup, name: trimmed });
+      setGroups(groups.map(g => g.id === activeGroup.id ? { ...g, name: trimmed } : g));
       setIsEditingGroupName(false);
     } catch (e) {
       alert("グループ名の変更に失敗しました: " + e.message);
@@ -1087,18 +1112,18 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
               
               let itemBg = 'bg-gray-50 border-gray-100';
               let badgeBg = 'bg-gray-200 text-gray-700';
-              if (p.bossNotice) { itemBg = 'bg-purple-50 border-purple-200'; badgeBg = 'bg-purple-200 text-purple-800'; }
+              if (p.bossNotice) { itemBg = 'bg-purple-50 border-purple-200'; badgeBg = 'bg-purple-600 text-white'; }
               else if (isAllOK) { itemBg = 'bg-emerald-50 border-emerald-200'; badgeBg = 'bg-emerald-200 text-emerald-800'; } 
               else if (isTriangle) { itemBg = 'bg-amber-50 border-amber-200'; badgeBg = 'bg-amber-200 text-amber-800'; }
 
               return (
                 <div key={p.period} className={`p-3 rounded-xl flex items-center gap-3 border ${itemBg}`}>
-                  <div className={`w-14 text-center font-bold text-xs py-1.5 rounded-lg ${badgeBg}`}>{formatPeriod(p.period)}</div>
+                  <div className={`w-14 text-center font-bold text-xs py-1.5 rounded-lg shrink-0 ${badgeBg}`}>{formatPeriod(p.period)}</div>
                   <div className="flex-1">
                     {p.bossNotice && (
-                      <div className="text-xs font-bold text-purple-700 flex items-center gap-1 mb-1 bg-purple-100/60 p-1.5 rounded-lg">
-                        <AlertTriangle size={14} className="shrink-0" />
-                        <span>管理者連絡: {p.bossNotice}</span>
+                      <div className="text-xs font-bold text-purple-800 flex items-center gap-1 mb-1 bg-purple-100 p-1.5 rounded-lg border border-purple-200">
+                        <AlertTriangle size={14} className="shrink-0 text-purple-600" />
+                        <span>【{formatPeriod(p.period)}】管理者連絡: {p.bossNotice}</span>
                       </div>
                     )}
                     {isAllOK ? (
@@ -1211,16 +1236,16 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                   else if (dp.category === 4) badge = <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">▲ 要調整(△有)</span>;
 
                   return (
-                    <div key={dp.period} className="flex flex-col gap-1.5 p-2.5 bg-gray-50 rounded-xl border border-gray-100">
+                    <div key={dp.period} className={`flex flex-col gap-1.5 p-2.5 rounded-xl border ${dp.bossNotice ? 'bg-purple-50/70 border-purple-200' : 'bg-gray-50 border-gray-100'}`}>
                       <div className="flex items-center gap-3">
                         <span className="font-bold text-gray-800 w-12 text-center text-sm">{formatPeriod(dp.period)}</span>
                         {badge}
                       </div>
                       
                       {dp.bossNotice && (
-                        <div className="text-xs font-bold text-purple-700 ml-14 bg-purple-100/70 p-2 rounded-lg flex items-center gap-1.5">
-                          <AlertTriangle size={14} className="shrink-0" />
-                          <span>管理者連絡: {dp.bossNotice}</span>
+                        <div className="text-xs font-bold text-purple-800 ml-14 bg-purple-100 p-2 rounded-lg flex items-center gap-1.5 border border-purple-200">
+                          <AlertTriangle size={14} className="shrink-0 text-purple-600" />
+                          <span>【{formatPeriod(dp.period)}】管理者連絡: {dp.bossNotice}</span>
                         </div>
                       )}
 
@@ -1535,7 +1560,7 @@ function AdminView() {
           {groups.map(g => (
             <div key={g.id} className="bg-white p-3 rounded-xl shadow-sm border flex justify-between">
               <div><p className="font-bold text-sm text-gray-900">{g.name}</p><p className="text-[10px] text-gray-500">コード: {g.joinCode}</p></div>
-              <button onClick={() => handleDelete('group', g.id)} className="text-red-500 p-2"><Trash2 size={16}/></button>
+              <button onClick={() => handleDelete('group', g.id)} className="text-red-500 p-2"><Trash2 size={16}/></button>}
             </div>
           ))}
         </div>
