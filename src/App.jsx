@@ -183,8 +183,7 @@ function TutorialModal({ onClose }) {
               </div>
               <h3 className="text-lg font-bold text-gray-900">5. 空き日が一目でわかる！</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                グループ画面の「空き日一覧」タブを見ると、メンバーの所属バンドを確認しながら空き日をチェックできます。<br/><br/>
-                <strong>◎ 全員参加</strong>の日や、<strong>△ 一部NG（誰がいないか）</strong>がひと目で分かるので、練習日決めが圧倒的にスムーズになります！
+                グループ画面の「カレンダー」や「空き日一覧」では、メンバーの所属バンドを上部パネルで確認しながら空き日をチェックできます！
               </p>
             </div>
           )}
@@ -1080,6 +1079,10 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [isEditingGroupName, setIsEditingGroupName] = useState(false);
   const [editingGroupName, setEditingGroupName] = useState('');
 
+  // バンドグループ削除確認モーダル用ステート
+  const [showDeleteGroupModal, setShowDeleteGroupModal] = useState(false);
+  const [isDeletingGroup, setIsDeletingGroup] = useState(false);
+
   const [groupMembers, setGroupMembers] = useState([]);
   const [allSchedules, setAllSchedules] = useState([]);
   const [groupViewTab, setGroupViewTab] = useState('calendar');
@@ -1087,7 +1090,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
 
-  // 空き日一覧での「所属バンド表示パネル」用ステート
+  // カレンダー＆空き日一覧で共有する「所属バンド表示パネル」用ステート
   const [showBandPanel, setShowBandPanel] = useState(true);
   const [selectedBandCategoryFilter, setSelectedBandCategoryFilter] = useState('すべて');
   const [hiddenBandKeys, setHiddenBandKeys] = useState([]);
@@ -1119,9 +1122,15 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   }, [activeGroup, user]);
 
   const handleCreateGroup = async () => {
-    if (!newGroupName) return;
+    if (!newGroupName.trim()) return;
     try {
-      const newGroup = { name: newGroupName, joinCode: generateJoinCode(), members: [user.id], createdAt: new Date().toISOString() };
+      const newGroup = {
+        name: newGroupName.trim(),
+        joinCode: generateJoinCode(),
+        members: [user.id],
+        createdBy: user.id,
+        createdAt: new Date().toISOString()
+      };
       const docRef = await addDoc(collection(db, "groups"), newGroup);
       setGroups([...groups, { id: docRef.id, ...newGroup }]);
       setNewGroupName('');
@@ -1158,6 +1167,22 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       setIsEditingGroupName(false);
     } catch (e) {
       alert("グループ名の変更に失敗しました: " + e.message);
+    }
+  };
+
+  // バンドグループ削除の実行処理
+  const handleConfirmDeleteGroup = async () => {
+    if (!activeGroup || isDeletingGroup) return;
+    setIsDeletingGroup(true);
+    try {
+      await deleteDoc(doc(db, "groups", activeGroup.id));
+      setGroups(groups.filter(g => g.id !== activeGroup.id));
+      setShowDeleteGroupModal(false);
+      setActiveGroup(null);
+    } catch (e) {
+      alert("グループの削除に失敗しました: " + e.message);
+    } finally {
+      setIsDeletingGroup(false);
     }
   };
 
@@ -1280,7 +1305,191 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     );
   };
 
+  // カレンダー＆空き日一覧で共通利用する「スクロール追従・所属バンドパネル」
+  const renderStickyBandPanel = () => {
+    const allGroupBands = getAggregatedGroupBands();
+    const categoryFilteredBands = selectedBandCategoryFilter === 'すべて'
+      ? allGroupBands
+      : allGroupBands.filter(b => b.category === selectedBandCategoryFilter);
+    const visibleBands = categoryFilteredBands.filter(b => !hiddenBandKeys.includes(b.key));
+
+    return (
+      <div className="sticky top-14 z-20 pt-2 pb-1 px-4 bg-gray-50/95 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl shadow-md border border-indigo-100 p-3 space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Users size={15} className="text-indigo-600 shrink-0" />
+              <span className="text-xs font-bold text-gray-800 truncate">
+                メンバーの所属バンド
+              </span>
+              <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full font-bold border border-indigo-100 shrink-0">
+                表示 {visibleBands.length}/{categoryFilteredBands.length}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              {showBandPanel && categoryFilteredBands.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsManagingBandVisibility(!isManagingBandVisibility)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
+                    isManagingBandVisibility
+                      ? 'bg-amber-500 text-white border-amber-600'
+                      : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                  }`}
+                >
+                  {isManagingBandVisibility ? '個別設定を完了' : '個別ON/OFF'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowBandPanel(!showBandPanel)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border transition-colors ${
+                  showBandPanel
+                    ? 'bg-indigo-600 text-white border-indigo-700'
+                    : 'bg-gray-100 text-gray-600 border-gray-200'
+                }`}
+              >
+                {showBandPanel ? <Eye size={12} /> : <EyeOff size={12} />}
+                <span>バンド表示: {showBandPanel ? 'ON' : 'OFF'}</span>
+              </button>
+            </div>
+          </div>
+
+          {showBandPanel && (
+            <>
+              <div className="flex gap-1 overflow-x-auto pb-0.5">
+                {['すべて', ...BAND_CATEGORIES].map(cat => {
+                  const count = cat === 'すべて'
+                    ? allGroupBands.length
+                    : allGroupBands.filter(b => b.category === cat).length;
+                  return (
+                    <button
+                      type="button"
+                      key={cat}
+                      onClick={() => setSelectedBandCategoryFilter(cat)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap border transition-all ${
+                        selectedBandCategoryFilter === cat
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                          : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                      }`}
+                    >
+                      {cat} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+
+              {isManagingBandVisibility && categoryFilteredBands.length > 0 && (
+                <div className="flex items-center justify-between bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-xl text-[10px]">
+                  <span className="text-amber-800 font-bold">各バンドをタップして表示(ON)/非表示(OFF)を切替</span>
+                  <div className="flex gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const keysToShow = categoryFilteredBands.map(b => b.key);
+                        setHiddenBandKeys(prev => prev.filter(k => !keysToShow.includes(k)));
+                      }}
+                      className="bg-white text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded font-bold"
+                    >
+                      すべてON
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const keysToHide = categoryFilteredBands.map(b => b.key);
+                        setHiddenBandKeys(prev => Array.from(new Set([...prev, ...keysToHide])));
+                      }}
+                      className="bg-white text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded font-bold"
+                    >
+                      すべてOFF
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="max-h-32 overflow-y-auto pr-0.5">
+                {categoryFilteredBands.length === 0 ? (
+                  <p className="text-[11px] text-gray-400 text-center py-2">
+                    「{selectedBandCategoryFilter}」に登録されているバンドはありません
+                  </p>
+                ) : isManagingBandVisibility ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {categoryFilteredBands.map(b => {
+                      const isHidden = hiddenBandKeys.includes(b.key);
+                      return (
+                        <button
+                          type="button"
+                          key={b.key}
+                          onClick={() => toggleBandVisibility(b.key)}
+                          className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-[11px] border transition-all ${
+                            isHidden
+                              ? 'bg-gray-100 text-gray-400 border-gray-200 opacity-60'
+                              : 'bg-white text-gray-800 border-indigo-300 shadow-sm'
+                          }`}
+                        >
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                            isHidden ? 'bg-gray-300 text-gray-600' : 'bg-indigo-600 text-white'
+                          }`}>
+                            {isHidden ? 'OFF' : 'ON'}
+                          </span>
+                          <span className="font-bold">{b.name}</span>
+                          <span className="text-[10px] text-gray-500">({b.members.join(', ')})</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : visibleBands.length === 0 ? (
+                  <div className="text-center py-2 space-y-1">
+                    <p className="text-[11px] text-gray-400">表示がすべてOFFになっています</p>
+                    <button
+                      type="button"
+                      onClick={() => setIsManagingBandVisibility(true)}
+                      className="text-[10px] text-indigo-600 font-bold underline"
+                    >
+                      個別ON/OFF設定を開く
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {visibleBands.map(b => (
+                      <div
+                        key={b.key}
+                        className="inline-flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-xl px-2 py-1 text-[11px]"
+                      >
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${getBandCategoryBadgeStyle(b.category)}`}>
+                          {b.category}
+                        </span>
+                        <span className="font-bold text-gray-900">{b.name}</span>
+                        <span className="text-[10px] text-indigo-700 font-medium">
+                          ({b.members.join(', ')})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleBandVisibility(b.key)}
+                          className="ml-0.5 p-0.5 text-gray-400 hover:text-red-500 rounded"
+                          title="このバンドを非表示(OFF)にする"
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   if (activeGroup) {
+    // グループ作成者かどうか判定（過去に作られたcreatedBy未設定グループは先頭メンバーを作成者とみなす）
+    const isGroupCreator = activeGroup.createdBy
+      ? activeGroup.createdBy === user.id
+      : (Array.isArray(activeGroup.members) && activeGroup.members[0] === user.id) || user.username === 'Boss';
+
     const renderGroupCalendar = () => {
       const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
       const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getDay();
@@ -1318,7 +1527,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       }
 
       return (
-        <div className="p-4">
+        <div className="px-4 pt-2 pb-4">
           <div className="flex items-center justify-between mb-4 bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
             <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))} className="p-1 hover:bg-gray-100 rounded-lg"><ChevronLeft size={20} className="text-gray-600"/></button>
             <h2 className="text-lg font-bold text-gray-800">{currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月</h2>
@@ -1333,7 +1542,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       if (!selectedDate) return null;
       const status = getDayStatus(selectedDate);
       return (
-        <div className="p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-4">
+        <div className="p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-2">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-bold text-gray-800">
               {selectedDate.getMonth() + 1}/{selectedDate.getDate()} の空き状況
@@ -1459,188 +1668,8 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         return { ...item, dayPeriods: filteredPeriods };
       }).filter(item => item.dayPeriods.length > 0);
 
-      // グループ全員の所属バンド集計とフィルタリング
-      const allGroupBands = getAggregatedGroupBands();
-      const categoryFilteredBands = selectedBandCategoryFilter === 'すべて'
-        ? allGroupBands
-        : allGroupBands.filter(b => b.category === selectedBandCategoryFilter);
-      const visibleBands = categoryFilteredBands.filter(b => !hiddenBandKeys.includes(b.key));
-
       return (
-        <div className="px-4 pb-6 space-y-4">
-          {/* スクロール追従（Sticky）：グループ全員の所属バンド確認＆表示ON/OFFパネル */}
-          <div className="sticky top-14 z-20 pt-2 pb-1 -mx-4 px-4 bg-gray-50/95 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-md border border-indigo-100 p-3 space-y-2.5">
-              {/* パネルヘッダー：全体のバンド表示ON/OFFと個別設定ボタン */}
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <Users size={15} className="text-indigo-600 shrink-0" />
-                  <span className="text-xs font-bold text-gray-800 truncate">
-                    メンバーの所属バンド
-                  </span>
-                  <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full font-bold border border-indigo-100 shrink-0">
-                    表示 {visibleBands.length}/{categoryFilteredBands.length}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {showBandPanel && categoryFilteredBands.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setIsManagingBandVisibility(!isManagingBandVisibility)}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
-                        isManagingBandVisibility
-                          ? 'bg-amber-500 text-white border-amber-600'
-                          : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
-                      }`}
-                    >
-                      {isManagingBandVisibility ? '個別設定を完了' : '個別ON/OFF'}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setShowBandPanel(!showBandPanel)}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border transition-colors ${
-                      showBandPanel
-                        ? 'bg-indigo-600 text-white border-indigo-700'
-                        : 'bg-gray-100 text-gray-600 border-gray-200'
-                    }`}
-                  >
-                    {showBandPanel ? <Eye size={12} /> : <EyeOff size={12} />}
-                    <span>バンド表示: {showBandPanel ? 'ON' : 'OFF'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {showBandPanel && (
-                <>
-                  {/* バンド種別選択タブ */}
-                  <div className="flex gap-1 overflow-x-auto pb-0.5">
-                    {['すべて', ...BAND_CATEGORIES].map(cat => {
-                      const count = cat === 'すべて'
-                        ? allGroupBands.length
-                        : allGroupBands.filter(b => b.category === cat).length;
-                      return (
-                        <button
-                          type="button"
-                          key={cat}
-                          onClick={() => setSelectedBandCategoryFilter(cat)}
-                          className={`px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap border transition-all ${
-                            selectedBandCategoryFilter === cat
-                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                              : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
-                          }`}
-                        >
-                          {cat} ({count})
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* 個別バンドON/OFF設定モード時の案内と一括ボタン */}
-                  {isManagingBandVisibility && categoryFilteredBands.length > 0 && (
-                    <div className="flex items-center justify-between bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-xl text-[10px]">
-                      <span className="text-amber-800 font-bold">各バンドをタップして表示(ON)/非表示(OFF)を切替</span>
-                      <div className="flex gap-1 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const keysToShow = categoryFilteredBands.map(b => b.key);
-                            setHiddenBandKeys(prev => prev.filter(k => !keysToShow.includes(k)));
-                          }}
-                          className="bg-white text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded font-bold"
-                        >
-                          すべてON
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const keysToHide = categoryFilteredBands.map(b => b.key);
-                            setHiddenBandKeys(prev => Array.from(new Set([...prev, ...keysToHide])));
-                          }}
-                          className="bg-white text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded font-bold"
-                        >
-                          すべてOFF
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* バンド一覧表示エリア（スクロール可能） */}
-                  <div className="max-h-32 overflow-y-auto pr-0.5">
-                    {categoryFilteredBands.length === 0 ? (
-                      <p className="text-[11px] text-gray-400 text-center py-2">
-                        「{selectedBandCategoryFilter}」に登録されているバンドはありません
-                      </p>
-                    ) : isManagingBandVisibility ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {categoryFilteredBands.map(b => {
-                          const isHidden = hiddenBandKeys.includes(b.key);
-                          return (
-                            <button
-                              type="button"
-                              key={b.key}
-                              onClick={() => toggleBandVisibility(b.key)}
-                              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-[11px] border transition-all ${
-                                isHidden
-                                  ? 'bg-gray-100 text-gray-400 border-gray-200 opacity-60'
-                                  : 'bg-white text-gray-800 border-indigo-300 shadow-sm'
-                              }`}
-                            >
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                                isHidden ? 'bg-gray-300 text-gray-600' : 'bg-indigo-600 text-white'
-                              }`}>
-                                {isHidden ? 'OFF' : 'ON'}
-                              </span>
-                              <span className="font-bold">{b.name}</span>
-                              <span className="text-[10px] text-gray-500">({b.members.join(', ')})</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : visibleBands.length === 0 ? (
-                      <div className="text-center py-2 space-y-1">
-                        <p className="text-[11px] text-gray-400">表示がすべてOFFになっています</p>
-                        <button
-                          type="button"
-                          onClick={() => setIsManagingBandVisibility(true)}
-                          className="text-[10px] text-indigo-600 font-bold underline"
-                        >
-                          個別ON/OFF設定を開く
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {visibleBands.map(b => (
-                          <div
-                            key={b.key}
-                            className="inline-flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-xl px-2 py-1 text-[11px]"
-                          >
-                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${getBandCategoryBadgeStyle(b.category)}`}>
-                              {b.category}
-                            </span>
-                            <span className="font-bold text-gray-900">{b.name}</span>
-                            <span className="text-[10px] text-indigo-700 font-medium">
-                              ({b.members.join(', ')})
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => toggleBandVisibility(b.key)}
-                              className="ml-0.5 p-0.5 text-gray-400 hover:text-red-500 rounded"
-                              title="このバンドを非表示(OFF)にする"
-                            >
-                              <X size={11} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
+        <div className="px-4 pt-2 pb-6 space-y-4">
           {list.length === 0 ? (
             <div className="p-8 text-center text-gray-500 bg-white rounded-2xl border border-gray-100">
               直近60日で1人でも参加できる枠はありません。
@@ -1827,7 +1856,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                   {formatYearWithGrade(m.year)}
                 </div>
                 
-                {/* 担当パート */}
                 <div className="flex flex-wrap gap-1 mt-2">
                   {m.parts && m.parts.map(part => (
                     <span key={part} className="bg-gray-100 text-gray-600 text-[10px] px-1.5 py-0.5 rounded-md font-medium">{part}</span>
@@ -1835,7 +1863,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                   {(!m.parts || m.parts.length === 0) && <span className="text-[10px] text-gray-400">パート未設定</span>}
                 </div>
 
-                {/* 所属バンド一覧 */}
                 <div className="mt-2.5 pt-2 border-t border-gray-100">
                   <p className="text-[10px] font-bold text-gray-400 mb-1.5">所属バンド</p>
                   {m.bands && m.bands.length > 0 ? (
@@ -1881,15 +1908,30 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                 <button onClick={() => setIsEditingGroupName(false)} className="bg-gray-100 text-gray-600 px-2 py-1 rounded-lg text-xs">取消</button>
               </div>
             ) : (
-              <div className="flex items-center gap-2">
-                <h2 className="text-xl font-bold text-gray-900 truncate">{activeGroup.name}</h2>
-                <button 
-                  onClick={() => { setEditingGroupName(activeGroup.name); setIsEditingGroupName(true); }}
-                  className="p-1 text-gray-400 hover:text-indigo-600 rounded-lg hover:bg-gray-100 shrink-0"
-                  title="グループ名を変更"
-                >
-                  <Edit2 size={16} />
-                </button>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <h2 className="text-xl font-bold text-gray-900 truncate">{activeGroup.name}</h2>
+                  <button 
+                    onClick={() => { setEditingGroupName(activeGroup.name); setIsEditingGroupName(true); }}
+                    className="p-1 text-gray-400 hover:text-indigo-600 rounded-lg hover:bg-gray-100 shrink-0"
+                    title="グループ名を変更"
+                  >
+                    <Edit2 size={16} />
+                  </button>
+                </div>
+
+                {/* グループ作成者（またはBoss）のみグループ削除ボタンを表示 */}
+                {isGroupCreator && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteGroupModal(true)}
+                    className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-xl text-[11px] font-bold transition-colors shrink-0"
+                    title="このバンドグループを削除"
+                  >
+                    <Trash2 size={13} />
+                    <span>グループ削除</span>
+                  </button>
+                )}
               </div>
             )}
             <div className="flex items-center gap-2 mt-1">
@@ -1905,9 +1947,48 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             <button onClick={() => setGroupViewTab('members')} className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${groupViewTab === 'members' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>メンバー</button>
         </div>
 
+        {/* カレンダーと空き日一覧の両方で上部固定の所属バンドパネルを表示 */}
+        {(groupViewTab === 'calendar' || groupViewTab === 'list') && renderStickyBandPanel()}
+
         {groupViewTab === 'calendar' && <>{renderGroupCalendar()}{renderGroupDayDetail()}</>}
         {groupViewTab === 'list' && renderAvailableList()}
         {groupViewTab === 'members' && renderMemberList()}
+
+        {/* バンドグループ削除の確認ポップアップ（ワンクッション） */}
+        {showDeleteGroupModal && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-in zoom-in-95 duration-150">
+              <div className="flex items-center gap-2 text-red-600 mb-3">
+                <AlertTriangle size={22} className="shrink-0" />
+                <h4 className="font-bold text-base text-gray-900">グループ削除の確認</h4>
+              </div>
+              <p className="text-xs text-gray-700 leading-relaxed font-medium mb-2">
+                バンドグループ「<strong>{activeGroup.name}</strong>」を本当に削除しますか？
+              </p>
+              <p className="text-[11px] text-red-600 bg-red-50 p-2.5 rounded-xl mb-5 border border-red-100">
+                ※削除するとメンバー全員の画面からこのグループが消去され、元に戻すことはできません。
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={isDeletingGroup}
+                  onClick={() => setShowDeleteGroupModal(false)}
+                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-200 transition-colors"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingGroup}
+                  onClick={handleConfirmDeleteGroup}
+                  className="flex-1 py-2.5 bg-red-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-red-700 transition-colors disabled:opacity-50"
+                >
+                  {isDeletingGroup ? '削除中...' : '削除する'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1988,6 +2069,10 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
   const [bandError, setBandError] = useState('');
   const [isUpdatingBands, setIsUpdatingBands] = useState(false);
 
+  // 自身のアカウント削除確認モーダル用ステート
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+
   const saveUserToLocalStorage = (updatedUser) => {
     const storedAuth = localStorage.getItem('wpb_bandsync_auth');
     if (storedAuth) {
@@ -2052,7 +2137,6 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
     setIsSavingCreds(true);
 
     try {
-      // ログインIDが変更された場合は重複チェック
       if (trimmedUsername !== user.username) {
         const q = query(collection(db, "users"), where("username", "==", trimmedUsername));
         const snap = await getDocs(q);
@@ -2127,6 +2211,38 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
       alert('削除に失敗しました: ' + err.message);
     } finally {
       setIsUpdatingBands(false);
+    }
+  };
+
+  // 自分自身のアカウントを削除する処理
+  const handleConfirmDeleteSelfAccount = async () => {
+    if (isDeletingAccount) return;
+    setIsDeletingAccount(true);
+    try {
+      // 1. 自分のスケジュールデータをすべて削除
+      const schedQ = query(collection(db, "schedules"), where("userId", "==", user.id));
+      const schedSnap = await getDocs(schedQ);
+      for (const sDoc of schedSnap.docs) {
+        await deleteDoc(doc(db, "schedules", sDoc.id));
+      }
+
+      // 2. 参加しているグループのmembers配列から自分のIDを除外
+      const groupQ = query(collection(db, "groups"), where("members", "array-contains", user.id));
+      const groupSnap = await getDocs(groupQ);
+      for (const gDoc of groupSnap.docs) {
+        const gData = gDoc.data();
+        const updatedMembers = (gData.members || []).filter(mId => mId !== user.id);
+        await updateDoc(doc(db, "groups", gDoc.id), { members: updatedMembers });
+      }
+
+      // 3. ユーザー自身のドキュメントを削除
+      await deleteDoc(doc(db, "users", user.id));
+
+      setShowDeleteAccountModal(false);
+      handleLogout();
+    } catch (err) {
+      alert('アカウント削除中にエラーが発生しました: ' + err.message);
+      setIsDeletingAccount(false);
     }
   };
 
@@ -2434,13 +2550,59 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
          </div>
 
          <div 
-           className="p-4 flex items-center justify-between bg-red-50 cursor-pointer hover:bg-red-100 transition-colors"
+           className="p-4 border-b border-gray-50 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors"
            onClick={handleLogout}
          >
-            <span className="font-medium text-sm text-red-600">ログアウト</span>
-            <LogOut size={16} className="text-red-500" />
+            <span className="font-medium text-sm text-gray-700">ログアウト</span>
+            <LogOut size={16} className="text-gray-500" />
          </div>
+
+         {user.username !== 'Boss' && (
+           <div 
+             className="p-4 flex items-center justify-between bg-red-50/70 cursor-pointer hover:bg-red-100 transition-colors"
+             onClick={() => setShowDeleteAccountModal(true)}
+           >
+              <span className="font-bold text-sm text-red-600">アカウントを削除する</span>
+              <Trash2 size={16} className="text-red-500" />
+           </div>
+         )}
       </div>
+
+      {/* 自分自身のアカウント削除確認モーダル（ワンクッション） */}
+      {showDeleteAccountModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-2 text-red-600 mb-3">
+              <AlertTriangle size={22} className="shrink-0" />
+              <h4 className="font-bold text-base text-gray-900">アカウント削除の確認</h4>
+            </div>
+            <p className="text-xs text-gray-700 leading-relaxed font-medium mb-2">
+              あなたのアカウント「<strong>{user.displayName} (@{user.username})</strong>」を本当に削除しますか？
+            </p>
+            <p className="text-[11px] text-red-600 bg-red-50 p-2.5 rounded-xl mb-5 border border-red-100">
+              ※登録した予定・プロフィール・グループ参加情報がすべて削除され、元に戻すことはできません。
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={isDeletingAccount}
+                onClick={() => setShowDeleteAccountModal(false)}
+                className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-200 transition-colors"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingAccount}
+                onClick={handleConfirmDeleteSelfAccount}
+                className="flex-1 py-2.5 bg-red-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                {isDeletingAccount ? '削除中...' : '削除する'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2455,6 +2617,10 @@ function AdminView() {
   const [isUserListOpen, setIsUserListOpen] = useState(true);
   const [isGroupListOpen, setIsGroupListOpen] = useState(true);
 
+  // Boss用：ユーザー・グループ削除確認モーダル用ステート
+  const [deleteTarget, setDeleteTarget] = useState(null); // { type: 'user' | 'group', id, name }
+  const [isDeleting, setIsDeleting] = useState(false);
+
   useEffect(() => {
     if (!db) return;
     const fetchData = async () => {
@@ -2466,17 +2632,43 @@ function AdminView() {
     fetchData();
   }, []);
 
-  const handleDelete = async (type, id, labelName) => {
-    if (!window.confirm(`「${labelName}」を削除してもよろしいですか？`)) return;
+  const handleConfirmAdminDelete = async () => {
+    if (!deleteTarget || isDeleting) return;
+    setIsDeleting(true);
     try {
-      if (type === 'user') {
-        await deleteDoc(doc(db, "users", id));
-        setUsers(users.filter(u => u.id !== id));
-      } else if (type === 'group') {
-        await deleteDoc(doc(db, "groups", id));
-        setGroups(groups.filter(g => g.id !== id));
+      if (deleteTarget.type === 'user') {
+        const targetUserId = deleteTarget.id;
+        // スケジュール削除
+        const schedQ = query(collection(db, "schedules"), where("userId", "==", targetUserId));
+        const schedSnap = await getDocs(schedQ);
+        for (const sDoc of schedSnap.docs) {
+          await deleteDoc(doc(db, "schedules", sDoc.id));
+        }
+        // 参加グループから除外
+        const updatedGroups = [];
+        for (const g of groups) {
+          if (Array.isArray(g.members) && g.members.includes(targetUserId)) {
+            const newMembers = g.members.filter(mId => mId !== targetUserId);
+            await updateDoc(doc(db, "groups", g.id), { members: newMembers });
+            updatedGroups.push({ ...g, members: newMembers });
+          } else {
+            updatedGroups.push(g);
+          }
+        }
+        setGroups(updatedGroups);
+        // ユーザードキュメント削除
+        await deleteDoc(doc(db, "users", targetUserId));
+        setUsers(users.filter(u => u.id !== targetUserId));
+      } else if (deleteTarget.type === 'group') {
+        await deleteDoc(doc(db, "groups", deleteTarget.id));
+        setGroups(groups.filter(g => g.id !== deleteTarget.id));
       }
-    } catch(e) { alert("削除に失敗しました"); }
+      setDeleteTarget(null);
+    } catch(e) {
+      alert("削除に失敗しました: " + e.message);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // ユーザーが参加しているバンドグループ一覧を取得
@@ -2581,7 +2773,8 @@ function AdminView() {
                     </div>
                     {u.username !== 'Boss' && (
                       <button
-                        onClick={() => handleDelete('user', u.id, u.displayName)}
+                        type="button"
+                        onClick={() => setDeleteTarget({ type: 'user', id: u.id, name: `${u.displayName} (@${u.username})` })}
                         className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors shrink-0"
                         title="ユーザーを削除"
                       >
@@ -2686,7 +2879,8 @@ function AdminView() {
                       </p>
                     </div>
                     <button
-                      onClick={() => handleDelete('group', g.id, g.name)}
+                      type="button"
+                      onClick={() => setDeleteTarget({ type: 'group', id: g.id, name: g.name })}
                       className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors shrink-0"
                       title="グループを削除"
                     >
@@ -2718,6 +2912,46 @@ function AdminView() {
           </div>
         )}
       </div>
+
+      {/* Boss用：ユーザー／グループ削除の確認ポップアップ（ワンクッション） */}
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-2 text-red-600 mb-3">
+              <AlertTriangle size={22} className="shrink-0" />
+              <h4 className="font-bold text-base text-gray-900">
+                {deleteTarget.type === 'user' ? 'アカウント削除の確認' : 'グループ削除の確認'}
+              </h4>
+            </div>
+            <p className="text-xs text-gray-700 leading-relaxed font-medium mb-2">
+              {deleteTarget.type === 'user'
+                ? `ユーザー「${deleteTarget.name}」を本当に削除しますか？`
+                : `バンドグループ「${deleteTarget.name}」を本当に削除しますか？`}
+            </p>
+            <p className="text-[11px] text-red-600 bg-red-50 p-2.5 rounded-xl mb-5 border border-red-100">
+              ※この操作は取り消せません。関連するデータも削除されます。
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setDeleteTarget(null)}
+                className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-200 transition-colors"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleConfirmAdminDelete}
+                className="flex-1 py-2.5 bg-red-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                {isDeleting ? '削除中...' : '削除する'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
