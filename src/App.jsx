@@ -1,4 +1,3 @@
-``jsx
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from "firebase/app";
 import { 
@@ -112,7 +111,7 @@ function TutorialModal({ onClose }) {
               <h3 className="text-lg font-bold text-gray-900">3. 「臨時OK」の裏ワザ</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
                 「普段は毎週火曜日NGにしているけど、<strong>来週の火曜は祝日だから特別に行ける！</strong>」<br/><br/>
-                そんな時は、モードを<strong className="text-blue-500">「〇 臨時OK」</strong>にして該当の日をタップしてください。普段の「毎週×」の予定を崩さずに、その日だけ「行ける」に上書きできます。
+                そんな時は、モードを<strong className="text-blue-500">「〇 臨時OK」</strong>にして該当の日をタップしてください[cite: 2]。普段の「毎週×」の予定を崩さずに、その日だけ「行ける」に上書きできます。
               </p>
             </div>
           )}
@@ -136,7 +135,7 @@ function TutorialModal({ onClose }) {
               </div>
               <h3 className="text-lg font-bold text-gray-900">5. 空き日が一目でわかる！</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                グループ画面の「空き日一覧」タブを見ると、メンバーの予定を自動で計算してリストアップします。<br/><br/>
+                グループ画面の「空き日一覧」タブを見ると、メンバーの予定を自動で計算してリストアップします[cite: 2]。<br/><br/>
                 <strong>◎ 全員参加</strong>の日や、<strong>△ 一部NG（誰がいないか）</strong>がひと目で分かるので、練習日決めが圧倒的にスムーズになります！
               </p>
             </div>
@@ -391,14 +390,14 @@ function MyScheduleView({ user }) {
     const rules = bossSchedules.filter(r => r.period === period);
     const dStr = getLocalYMD(date);
     
-    const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
-    if (onceRule) return onceRule;
-
     const isValidRule = (r) => {
       if (r.startDate && r.startDate > dStr) return false;
       if (r.endDate && r.endDate <= dStr) return false;
       return true;
     };
+
+    const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
+    if (onceRule) return onceRule;
 
     const findValidRule = (type, condition) => {
        const validRules = rules.filter(r => r.type === type && condition(r) && isValidRule(r));
@@ -427,14 +426,14 @@ function MyScheduleView({ user }) {
     const rules = mySchedules.filter(r => r.period === period);
     const dStr = getLocalYMD(date);
     
-    const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
-    if (onceRule) return { ...onceRule, status: onceRule.status || 'x', text: onceRule.text || '', isOverride: true };
-    
     const isValidRule = (r) => {
       if (r.startDate && r.startDate > dStr) return false;
       if (r.endDate && r.endDate <= dStr) return false;
       return true;
     };
+
+    const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
+    if (onceRule) return { ...onceRule, status: onceRule.status || 'x', text: onceRule.text || '', isOverride: true };
 
     const findValidRule = (type, condition) => {
        const validRules = rules.filter(r => r.type === type && condition(r) && isValidRule(r));
@@ -672,7 +671,6 @@ function MyScheduleView({ user }) {
     if (type === 'once') {
       toggleSchedule(date, period, type, newStatus, textVal, '');
     } else {
-      // 繰り返しの場合、終了日を設定できるモーダルを開く
       setConfirmDialog({
         type: 'periodInput',
         title: '繰り返し期間の指定',
@@ -681,7 +679,7 @@ function MyScheduleView({ user }) {
         newStatus: newStatus,
         textVal: textVal,
         date: date,
-        endDate: '' // 初期値は無期限（空）
+        endDate: ''
       });
     }
   };
@@ -926,7 +924,6 @@ function MyScheduleView({ user }) {
       {renderCalendar()}
       {renderDayDetail()}
 
-      {/* 確認・期間設定ダイアログモーダル */}
       {confirmDialog && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
           <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 duration-150">
@@ -1102,7 +1099,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     const rules = allSchedules.filter(r => r.userId === userId && r.period === period);
     const dStr = getLocalYMD(date);
     
-    // 期間（開始日・終了日）のチェック関数
     const isValidRule = (r) => {
       if (r.startDate && r.startDate > dStr) return false;
       if (r.endDate && r.endDate <= dStr) return false;
@@ -1810,4 +1806,3 @@ function AdminView() {
     </div>
   );
 }
-```
