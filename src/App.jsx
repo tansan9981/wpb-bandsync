@@ -19,7 +19,6 @@ const firebaseConfig = {
   appId: "1:834123232552:web:4acd559725a5892aa6cc1d"
 };
 
-// Initialize Firebase
 let db;
 try {
   const app = initializeApp(firebaseConfig);
@@ -28,7 +27,6 @@ try {
   console.warn("Firebase Error:", e);
 }
 
-// --- Shared Logic ---
 const generateJoinCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
 const getPeriodListForDate = (date) => {
@@ -47,7 +45,6 @@ const getLocalYMD = (date) => {
   return `${y}-${m}-${d}`;
 };
 
-// --- Tutorial Component ---
 function TutorialModal({ onClose }) {
   const [step, setStep] = useState(1);
   const totalSteps = 6;
@@ -98,7 +95,7 @@ function TutorialModal({ onClose }) {
               <h3 className="text-lg font-bold text-gray-900">2. 繰り返しと一括設定</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
                 「この日」だけでなく、<strong>「毎週」「毎月」</strong>のボタンを押せば、先の予定まで一気に登録できます。<br/><br/>
-                また、<strong>「この日を一括で設定（全日）」</strong>のボタンを使えば、1日丸ごとの予定を1タップで入力・解除できてとても便利です！
+                また、<strong>「この日を一括で設定（全日）」</strong>のボタンを使えば、1日丸ごとの予定をまとめて入力・解除できてとても便利です！
               </p>
             </div>
           )}
@@ -354,7 +351,6 @@ export default function App() {
   );
 }
 
-// --- MyScheduleView ---
 function MyScheduleView({ user }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
@@ -364,6 +360,8 @@ function MyScheduleView({ user }) {
   const [inputStatus, setInputStatus] = useState('x'); 
   const [customText, setCustomText] = useState(''); 
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   useEffect(() => {
     if (!db) return;
@@ -632,8 +630,59 @@ function MyScheduleView({ user }) {
     }
     
     setMySchedules(updatedSchedules);
+    if (user.username === 'Boss') {
+      const bossQ = query(collection(db, "schedules"), where("userId", "==", user.id));
+      const bossSnap = await getDocs(bossQ);
+      setBossSchedules(bossSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }
     setIsProcessing(false);
     if (hasError) alert("一括更新の一部でエラーが発生しました: " + errorMessage);
+  };
+
+  const getStatusLabel = (st) => {
+    if (st === 'x') return '× 行けない';
+    if (st === 'triangle') return '△ 微妙';
+    if (st === 'ok') return '〇 臨時OK';
+    if (st === 'studio1') return '1スタジオ不可';
+    if (st === 'studio2') return '2スタジオ不可';
+    return st;
+  };
+
+  const getTypeLabel = (type, date) => {
+    const dayName = ['日','月','火','水','木','金','土'][date.getDay()];
+    if (type === 'once') return `${date.getMonth() + 1}/${date.getDate()}(${dayName})のみ`;
+    if (type === 'weekly') return `毎週${dayName}曜日`;
+    if (type === 'monthly') return `毎月${date.getDate()}日`;
+    if (type === 'daily') return `毎日`;
+    return type;
+  };
+
+  const requestToggleSchedule = (date, period, type, newStatus, textVal = '') => {
+    if (type === 'once') {
+      toggleSchedule(date, period, type, newStatus, textVal);
+    } else {
+      setConfirmDialog({
+        title: '繰り返し予定の確認',
+        message: `「${getTypeLabel(type, date)}」の【${formatPeriod(period)}】に「${getStatusLabel(newStatus)}」を設定（または変更・解除）しますか？`,
+        subMessage: '※この日以降の将来の予定に反映されます。',
+        onConfirm: () => {
+          setConfirmDialog(null);
+          toggleSchedule(date, period, type, newStatus, textVal);
+        }
+      });
+    }
+  };
+
+  const requestSetAllDay = (type) => {
+    setConfirmDialog({
+      title: '1日一括設定の確認',
+      message: `「${getTypeLabel(type, selectedDate)}」の【すべての時限（全日）】に「${getStatusLabel(inputStatus)}」を一括で設定（または解除）しますか？`,
+      subMessage: type !== 'once' ? '※この日以降の将来の予定にも一括で反映されます。' : '※この日のすべての時限が変更されます。',
+      onConfirm: () => {
+        setConfirmDialog(null);
+        handleSetAllDay(type);
+      }
+    });
   };
 
   const renderCalendar = () => {
@@ -752,7 +801,7 @@ function MyScheduleView({ user }) {
               return (
                 <button 
                   key={`all-${type}`} 
-                  onClick={() => handleSetAllDay(type)}
+                  onClick={() => requestSetAllDay(type)}
                   disabled={isDisabled}
                   className={`flex-1 py-2 text-[10px] font-bold rounded-lg transition-colors border ${
                     isDisabled ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-50' :
@@ -832,7 +881,7 @@ function MyScheduleView({ user }) {
                       return (
                         <button 
                           key={type} 
-                          onClick={() => toggleSchedule(selectedDate, period, type, inputStatus, isBoss ? customText : '')} 
+                          onClick={() => requestToggleSchedule(selectedDate, period, type, inputStatus, isBoss ? customText : '')} 
                           disabled={isDisabledByMode} 
                           className={`py-2 text-[10px] font-bold rounded-xl transition-all ${btnColor(type)}`}
                         >
@@ -849,10 +898,48 @@ function MyScheduleView({ user }) {
       </div>
     );
   };
-  return <div className="pb-4">{renderCalendar()}{renderDayDetail()}</div>;
+
+  return (
+    <div className="pb-4">
+      {renderCalendar()}
+      {renderDayDetail()}
+
+      {confirmDialog && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-2 text-indigo-600 mb-3">
+              <AlertTriangle size={22} className="shrink-0" />
+              <h4 className="font-bold text-base text-gray-900">{confirmDialog.title}</h4>
+            </div>
+            <p className="text-xs text-gray-700 leading-relaxed font-medium mb-2">
+              {confirmDialog.message}
+            </p>
+            {confirmDialog.subMessage && (
+              <p className="text-[11px] text-gray-500 bg-gray-50 p-2.5 rounded-xl mb-5">
+                {confirmDialog.subMessage}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConfirmDialog(null)}
+                className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-200 transition-colors"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={confirmDialog.onConfirm}
+                className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-indigo-700 transition-colors"
+              >
+                実行する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
-// --- GroupsView ---
 function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [groups, setGroups] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
@@ -866,7 +953,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [groupMembers, setGroupMembers] = useState([]);
   const [allSchedules, setAllSchedules] = useState([]);
   const [groupViewTab, setGroupViewTab] = useState('calendar');
-  const [listFilter, setListFilter] = useState('all'); // 【追加】空き日一覧の絞り込み用 ('all' | 'allOk' | 'perfectOnly')
+  const [listFilter, setListFilter] = useState('all'); 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
 
@@ -1130,7 +1217,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     const renderAvailableList = () => {
       const today = new Date();
       const list = [];
-      const allAvailableSummary = []; // 【追加】全員空いている日・時限をひとまとめにする配列
+      const allAvailableSummary = [];
       const actualMembersCount = groupMembers.filter(m => m.username !== 'Boss').length;
 
       if (actualMembersCount === 0) return <div className="p-8 text-center text-gray-500">メンバーがいません。</div>;
@@ -1193,7 +1280,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
       if (list.length === 0) return <div className="p-8 text-center text-gray-500">直近60日で1人でも参加できる枠はありません。</div>;
 
-      // フィルター適用後の詳細リストを作成
       const filteredList = list.map(item => {
         const filteredPeriods = item.dayPeriods.filter(dp => {
           if (listFilter === 'perfectOnly') return dp.category === 1;
@@ -1205,7 +1291,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
       return (
         <div className="p-4 space-y-4">
-          {/* 【追加】全員空いている日時をひと目で全部まとめて見れるダイジェスト枠 */}
           <div className="bg-emerald-50/90 border-2 border-emerald-300 rounded-2xl p-4 shadow-sm">
             <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-emerald-200">
               <div className="flex items-center gap-1.5">
@@ -1268,7 +1353,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             </div>
           </div>
 
-          {/* 絞り込みフィルターボタン */}
           <div className="flex bg-gray-200/80 p-1 rounded-xl gap-1">
             <button 
               onClick={() => setListFilter('all')} 
@@ -1495,7 +1579,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   );
 }
 
-// --- ProfileView ---
 function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [newDisplayName, setNewDisplayName] = useState(user.displayName);
@@ -1595,7 +1678,6 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
   );
 }
 
-// --- AdminView ---
 function AdminView() {
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
