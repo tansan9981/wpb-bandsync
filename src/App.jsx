@@ -45,6 +45,37 @@ const getBandCategoryBadgeStyle = (category) => {
   }
 };
 
+// 現在の「年度」を取得（毎年4月1日に年度が1つ上がる）
+const getCurrentAcademicYear = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  return month >= 4 ? year : year - 1;
+};
+
+// 選択可能な入学年度リストを生成
+const getYearOptions = () => {
+  const currentAY = getCurrentAcademicYear();
+  const options = [];
+  for (let y = currentAY; y >= currentAY - 5; y--) {
+    options.push(`${y}年度`);
+  }
+  options.push('OB/OG');
+  return options;
+};
+
+// 入学年度から「〇〇年度 (〇回生)」の文字列を算出
+const formatYearWithGrade = (yearStr) => {
+  if (!yearStr) return '年度未設定';
+  if (yearStr === 'OB/OG') return 'OB/OG';
+  const match = String(yearStr).match(/(\d{4})/);
+  if (!match) return yearStr;
+  const entryYear = parseInt(match[1], 10);
+  const currentAY = getCurrentAcademicYear();
+  const grade = currentAY - entryYear + 1;
+  if (grade <= 0) return `${entryYear}年度 (入学予定)`;
+  return `${entryYear}年度 (${grade}回生)`;
+};
+
 const generateJoinCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
 const getPeriodListForDate = (date) => {
@@ -188,7 +219,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('mySchedule');
   
   const [isLogin, setIsLogin] = useState(true);
-  const [authForm, setAuthForm] = useState({ username: '', password: '', confirmPassword: '', displayName: '', year: '2026年度', parts: [] });
+  const defaultYearOption = `${getCurrentAcademicYear()}年度`;
+  const [authForm, setAuthForm] = useState({ username: '', password: '', confirmPassword: '', displayName: '', year: defaultYearOption, parts: [] });
   const [authError, setAuthError] = useState('');
 
   const [activeGroup, setActiveGroup] = useState(null);
@@ -264,7 +296,7 @@ export default function App() {
     setUser(null); 
     setActiveTab('mySchedule'); 
     setActiveGroup(null);
-    setAuthForm({ username: '', password: '', confirmPassword: '', displayName: '', year: '2026年度', parts: [] });
+    setAuthForm({ username: '', password: '', confirmPassword: '', displayName: '', year: defaultYearOption, parts: [] });
     localStorage.removeItem('wpb_bandsync_auth');
   };
 
@@ -277,6 +309,7 @@ export default function App() {
   };
 
   if (!user) {
+    const yearOptions = getYearOptions();
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8">
@@ -320,9 +353,9 @@ export default function App() {
                   <input type="text" className="block w-full px-3 py-2 border border-gray-300 rounded-xl sm:text-sm" value={authForm.displayName} onChange={e => setAuthForm({...authForm, displayName: e.target.value})} required={!isLogin} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">入学年度</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">入学年度（現在の回生）</label>
                   <select className="block w-full px-3 py-2 border border-gray-300 rounded-xl sm:text-sm" value={authForm.year} onChange={e => setAuthForm({...authForm, year: e.target.value})}>
-                    {['2026年度', '2025年度', '2024年度', '2023年度', 'OB/OG'].map(y => <option key={y} value={y}>{y}</option>)}
+                    {yearOptions.map(y => <option key={y} value={y}>{formatYearWithGrade(y)}</option>)}
                   </select>
                 </div>
                 <div>
@@ -455,7 +488,6 @@ function MyScheduleView({ user }) {
     return getLocalYMD(prev);
   };
 
-  // 1つの時限の予定を「解除(mode='remove')」または「指定のtypeへ設定・切り替え(mode='set')」する共通関数
   const applyPeriodRuleChange = async (schedulesList, date, period, type, newStatus, textVal, startDateVal, endDateVal, mode) => {
     let updated = [...schedulesList];
     const dStr = startDateVal || getLocalYMD(date);
@@ -492,9 +524,7 @@ function MyScheduleView({ user }) {
       return updated;
     }
 
-    // mode === 'set'（設定・別タイプへの切り替え）
     if (type === 'once') {
-      // その日以降を開始日とする繰り返しルールがあれば削除して「この日」に置き換える
       const sameDayRecurring = getValidRecurringRules().filter(r => (r.startDate || '2000-01-01') >= dStr);
       for (const r of sameDayRecurring) {
         await deleteDoc(doc(db, "schedules", r.id));
@@ -511,21 +541,17 @@ function MyScheduleView({ user }) {
         updated.push({ id: docRef.id, ...newRule });
       }
     } else {
-      // 繰り返し（weekly, monthly, daily）への設定・切り替え
-      // 1. その日の「この日(once)」ルールが存在していれば削除（onceが残ると優先されて繰り返しに切り替わらないため）
       const existingOnce = updated.find(r => r.period === period && r.type === 'once' && r.date === dStr);
       if (existingOnce) {
         await deleteDoc(doc(db, "schedules", existingOnce.id));
         updated = updated.filter(r => r.id !== existingOnce.id);
       }
 
-      // 2. 異なる種類の有効な繰り返しルール（例：毎週にする時の毎月・毎日など）があれば終了/削除
       const otherRecurring = getValidRecurringRules().filter(r => r.type !== type);
       for (const r of otherRecurring) {
         await terminateRuleAtDate(r);
       }
 
-      // 3. 同じ種類の繰り返しルールを更新または新規作成
       const sameTypeRecurring = getValidRecurringRules(type);
       if (sameTypeRecurring.length > 0) {
         sameTypeRecurring.sort((a, b) => ((a.startDate || '1970-01-01') < (b.startDate || '1970-01-01') ? 1 : -1));
@@ -608,7 +634,6 @@ function MyScheduleView({ user }) {
     const isBoss = user.username === 'Boss';
     const textVal = isBoss ? customText : '';
 
-    // 現在画面上で、すべての時限がすでに指定の type / status / text / endDate で表示されているか確認
     const isAllAlreadyDisplayed = periods.every(period => {
       const currentDisplayed = computeScheduleRule(mySchedules, selectedDate, period);
       return currentDisplayed &&
@@ -1569,7 +1594,10 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                   <h4 className="font-bold text-gray-900 truncate">{m.displayName}</h4>
                   <span className="text-[10px] text-gray-400">@{m.username}</span>
                 </div>
-                <div className="text-xs text-gray-500 mt-0.5">{m.year}</div>
+                {/* 入学年度と自動計算された回生を表示 */}
+                <div className="text-xs font-medium text-indigo-600 mt-0.5">
+                  {formatYearWithGrade(m.year)}
+                </div>
                 
                 {/* 担当パート */}
                 <div className="flex flex-wrap gap-1 mt-2">
@@ -1713,6 +1741,10 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
   const [newDisplayName, setNewDisplayName] = useState(user.displayName);
   const [nameError, setNameError] = useState('');
 
+  // 入学年度変更用のステート
+  const [isEditingYear, setIsEditingYear] = useState(false);
+  const [newYear, setNewYear] = useState(user.year || `${getCurrentAcademicYear()}年度`);
+
   // 所属バンド追加用のステート
   const [selectedBandCategory, setSelectedBandCategory] = useState(BAND_CATEGORIES[0]);
   const [newBandName, setNewBandName] = useState('');
@@ -1746,6 +1778,18 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
       setNameError('');
     } catch (e) {
       setNameError('更新に失敗しました: ' + e.message);
+    }
+  };
+
+  const handleUpdateYear = async () => {
+    try {
+      await updateDoc(doc(db, "users", user.id), { year: newYear });
+      const updatedUser = { ...user, year: newYear };
+      setUser(updatedUser);
+      saveUserToLocalStorage(updatedUser);
+      setIsEditingYear(false);
+    } catch (e) {
+      alert('入学年度の更新に失敗しました: ' + e.message);
     }
   };
 
@@ -1799,6 +1843,10 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
   };
 
   const userBands = user.bands || [];
+  const yearOptions = getYearOptions();
+  if (user.year && !yearOptions.includes(user.year)) {
+    yearOptions.unshift(user.year);
+  }
 
   return (
     <div className="p-4 space-y-4">
@@ -1835,9 +1883,54 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
         )}
 
         <p className="text-sm text-gray-500">@{user.username}</p>
-        <div className="mt-6 flex justify-center gap-2 flex-wrap">
-          <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs font-medium border border-gray-200">{user.year}</span>
-          {user.parts && user.parts.map(part => <span key={part} className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold border border-indigo-100">{part}</span>)}
+
+        {/* 入学年度（回生表示）と変更フォーム */}
+        <div className="mt-5 flex flex-col items-center gap-2">
+          {isEditingYear ? (
+            <div className="flex items-center gap-2 bg-gray-50 p-2 rounded-2xl border border-gray-200">
+              <select
+                className="border border-gray-300 bg-white px-3 py-1.5 rounded-xl text-xs font-bold text-gray-800 focus:ring-2 focus:ring-indigo-500"
+                value={newYear}
+                onChange={e => setNewYear(e.target.value)}
+              >
+                {yearOptions.map(y => (
+                  <option key={y} value={y}>{formatYearWithGrade(y)}</option>
+                ))}
+              </select>
+              <button
+                onClick={handleUpdateYear}
+                className="bg-indigo-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-xs"
+              >
+                保存
+              </button>
+              <button
+                onClick={() => { setIsEditingYear(false); setNewYear(user.year); }}
+                className="bg-white border border-gray-200 text-gray-600 px-2.5 py-1.5 rounded-xl text-xs"
+              >
+                取消
+              </button>
+            </div>
+          ) : (
+            <div className="inline-flex items-center gap-1.5 bg-gray-100 text-gray-800 pl-3 pr-2 py-1 rounded-full text-xs font-bold border border-gray-200">
+              <span>{formatYearWithGrade(user.year)}</span>
+              <button
+                onClick={() => { setNewYear(user.year || `${getCurrentAcademicYear()}年度`); setIsEditingYear(true); }}
+                className="p-1 text-gray-400 hover:text-indigo-600 rounded-full hover:bg-white transition-colors"
+                title="入学年度を変更"
+              >
+                <Edit2 size={13} />
+              </button>
+            </div>
+          )}
+
+          {/* 担当パート */}
+          <div className="flex justify-center gap-1.5 flex-wrap mt-1">
+            {user.parts && user.parts.map(part => (
+              <span key={part} className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold border border-indigo-100">
+                {part}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -1851,7 +1944,6 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
           <span className="text-[10px] text-gray-400">グループメンバーに公開されます</span>
         </div>
 
-        {/* 登録済みバンド一覧 */}
         {userBands.length === 0 ? (
           <div className="text-center py-4 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
             <p className="text-xs text-gray-400">所属しているバンドがまだ登録されていません</p>
@@ -1882,7 +1974,6 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
           </div>
         )}
 
-        {/* 新規バンド追加フォーム */}
         <form onSubmit={handleAddBand} className="pt-3 border-t border-gray-100 space-y-3">
           <label className="block text-xs font-bold text-gray-700">新しい所属バンドを追加</label>
           {bandError && <p className="text-xs text-red-500">{bandError}</p>}
@@ -1996,8 +2087,11 @@ function AdminView() {
         <h3 className="text-sm font-bold text-gray-800 mb-3 border-b pb-2">全ユーザー一覧 ({users.length})</h3>
         <div className="space-y-2">
           {users.map(u => (
-            <div key={u.id} className="bg-white p-3 rounded-xl shadow-sm border flex justify-between">
-              <div><p className="font-bold text-sm text-gray-900">{u.displayName}</p><p className="text-[10px] text-gray-500">@{u.username}</p></div>
+            <div key={u.id} className="bg-white p-3 rounded-xl shadow-sm border flex justify-between items-center">
+              <div>
+                <p className="font-bold text-sm text-gray-900">{u.displayName}</p>
+                <p className="text-[10px] text-gray-500">@{u.username} ・ {formatYearWithGrade(u.year)}</p>
+              </div>
               {u.username !== 'Boss' && <button onClick={() => handleDelete('user', u.id)} className="text-red-500 p-2"><Trash2 size={16}/></button>}
             </div>
           ))}
@@ -2007,7 +2101,7 @@ function AdminView() {
         <h3 className="text-sm font-bold text-gray-800 mb-3 border-b pb-2 mt-6">全グループ一覧 ({groups.length})</h3>
         <div className="space-y-2">
           {groups.map(g => (
-            <div key={g.id} className="bg-white p-3 rounded-xl shadow-sm border flex justify-between">
+            <div key={g.id} className="bg-white p-3 rounded-xl shadow-sm border flex justify-between items-center">
               <div><p className="font-bold text-sm text-gray-900">{g.name}</p><p className="text-[10px] text-gray-500">コード: {g.joinCode}</p></div>
               <button onClick={() => handleDelete('group', g.id)} className="text-red-500 p-2"><Trash2 size={16}/></button>
             </div>
