@@ -6,7 +6,8 @@ import {
 } from "firebase/firestore";
 import { 
   Calendar as CalendarIcon, Users, User, Settings, Check, 
-  X, ChevronLeft, ChevronRight, Shield, LogOut, Trash2, KeyRound, BookOpen, AlertTriangle, Edit2, Plus
+  X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Shield, LogOut, 
+  Trash2, KeyRound, BookOpen, AlertTriangle, Edit2, Plus, Eye, EyeOff
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -182,7 +183,7 @@ function TutorialModal({ onClose }) {
               </div>
               <h3 className="text-lg font-bold text-gray-900">5. 空き日が一目でわかる！</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                グループ画面の「空き日一覧」タブを見ると、メンバーの予定を自動で計算してリストアップします。<br/><br/>
+                グループ画面の「空き日一覧」タブを見ると、メンバーの所属バンドを確認しながら空き日をチェックできます。<br/><br/>
                 <strong>◎ 全員参加</strong>の日や、<strong>△ 一部NG（誰がいないか）</strong>がひと目で分かるので、練習日決めが圧倒的にスムーズになります！
               </p>
             </div>
@@ -379,21 +380,21 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
-      <header className="bg-white shadow-sm border-b border-gray-100 z-10 sticky top-0">
+      <header className="bg-white shadow-sm border-b border-gray-100 z-30 sticky top-0">
         <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
           <h1 className="text-lg font-bold text-indigo-900">WPB BandSync</h1>
           <button onClick={handleLogout} className="text-gray-400 hover:text-gray-600"><LogOut size={20} /></button>
         </div>
       </header>
       
-      <main className="flex-1 w-full max-w-md mx-auto overflow-y-auto pb-20 relative">
+      <main className="flex-1 w-full max-w-md mx-auto pb-20 relative">
         {activeTab === 'mySchedule' && <MyScheduleView user={user} />}
         {activeTab === 'groups' && <GroupsView user={user} activeGroup={activeGroup} setActiveGroup={setActiveGroup} />}
         {activeTab === 'profile' && <ProfileView user={user} setUser={setUser} setShowTutorial={setShowTutorial} handleLogout={handleLogout} />}
         {activeTab === 'admin' && user.username === 'Boss' && <AdminView />}
       </main>
 
-      <nav className="bg-white border-t border-gray-200 fixed bottom-0 w-full z-20 pb-safe">
+      <nav className="bg-white border-t border-gray-200 fixed bottom-0 w-full z-30 pb-safe">
         <div className="max-w-md mx-auto flex">
           <button onClick={() => setActiveTab('mySchedule')} className={`flex-1 py-3 flex flex-col items-center justify-center space-y-1 ${activeTab === 'mySchedule' ? 'text-indigo-600' : 'text-gray-400'}`}><CalendarIcon size={22} /><span className="text-[10px] font-medium">マイ予定</span></button>
           <button onClick={() => { setActiveTab('groups'); setActiveGroup(null); }} className={`flex-1 py-3 flex flex-col items-center justify-center space-y-1 ${activeTab === 'groups' ? 'text-indigo-600' : 'text-gray-400'}`}><Users size={22} /><span className="text-[10px] font-medium">グループ</span></button>
@@ -1086,6 +1087,12 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
 
+  // 空き日一覧での「所属バンド表示パネル」用ステート
+  const [showBandPanel, setShowBandPanel] = useState(true);
+  const [selectedBandCategoryFilter, setSelectedBandCategoryFilter] = useState('すべて');
+  const [hiddenBandKeys, setHiddenBandKeys] = useState([]);
+  const [isManagingBandVisibility, setIsManagingBandVisibility] = useState(false);
+
   useEffect(() => {
     if (!db) return;
     const fetchGroups = async () => {
@@ -1235,6 +1242,42 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     else if (isAnyPeriodTriangleOnly) dayStatus = 'triangle';
 
     return { dayStatus, detail };
+  };
+
+  // グループメンバー全員の所属バンドを集約する関数
+  const getAggregatedGroupBands = () => {
+    const pureMembers = groupMembers.filter(m => m.username !== 'Boss');
+    const bandMap = new Map();
+
+    pureMembers.forEach(member => {
+      const bands = member.bands || [];
+      bands.forEach(b => {
+        if (!b || !b.name) return;
+        const cat = b.category || 'その他';
+        const key = `${cat}__${b.name.trim()}`;
+        if (!bandMap.has(key)) {
+          bandMap.set(key, {
+            key,
+            category: cat,
+            name: b.name.trim(),
+            members: [member.displayName]
+          });
+        } else {
+          const item = bandMap.get(key);
+          if (!item.members.includes(member.displayName)) {
+            item.members.push(member.displayName);
+          }
+        }
+      });
+    });
+
+    return Array.from(bandMap.values());
+  };
+
+  const toggleBandVisibility = (bandKey) => {
+    setHiddenBandKeys(prev =>
+      prev.includes(bandKey) ? prev.filter(k => k !== bandKey) : [...prev, bandKey]
+    );
   };
 
   if (activeGroup) {
@@ -1407,8 +1450,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         }
       }
 
-      if (list.length === 0) return <div className="p-8 text-center text-gray-500">直近60日で1人でも参加できる枠はありません。</div>;
-
       const filteredList = list.map(item => {
         const filteredPeriods = item.dayPeriods.filter(dp => {
           if (listFilter === 'perfectOnly') return dp.category === 1;
@@ -1418,160 +1459,348 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         return { ...item, dayPeriods: filteredPeriods };
       }).filter(item => item.dayPeriods.length > 0);
 
-      return (
-        <div className="p-4 space-y-4">
-          <div className="bg-emerald-50/90 border-2 border-emerald-300 rounded-2xl p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-emerald-200">
-              <div className="flex items-center gap-1.5">
-                <Check size={18} className="text-emerald-600" strokeWidth={3} />
-                <h3 className="font-bold text-emerald-950 text-sm">全員空いている日時まとめ（直近60日）</h3>
-              </div>
-              <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-bold">
-                {allAvailableSummary.length}日該当
-              </span>
-            </div>
+      // グループ全員の所属バンド集計とフィルタリング
+      const allGroupBands = getAggregatedGroupBands();
+      const categoryFilteredBands = selectedBandCategoryFilter === 'すべて'
+        ? allGroupBands
+        : allGroupBands.filter(b => b.category === selectedBandCategoryFilter);
+      const visibleBands = categoryFilteredBands.filter(b => !hiddenBandKeys.includes(b.key));
 
-            {allAvailableSummary.length === 0 ? (
-              <p className="text-xs text-emerald-800 py-2 text-center">
-                直近60日間でメンバー全員が揃う枠（×が0人の枠）はまだありません。
-              </p>
-            ) : (
-              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                {allAvailableSummary.map((sItem, sIdx) => {
-                  const dayOfWeek = ['日','月','火','水','木','金','土'][sItem.date.getDay()];
-                  const dayColor = sItem.date.getDay() === 0 ? 'text-red-600' : sItem.date.getDay() === 6 ? 'text-blue-600' : 'text-gray-800';
-                  return (
-                    <div key={sIdx} className="bg-white p-2.5 rounded-xl border border-emerald-200 flex flex-col gap-1.5 shadow-sm">
-                      <div className="flex items-center justify-between">
-                        <span className={`font-bold text-xs ${dayColor}`}>
-                          {sItem.date.getMonth() + 1}/{sItem.date.getDate()} ({dayOfWeek})
-                        </span>
+      return (
+        <div className="px-4 pb-6 space-y-4">
+          {/* スクロール追従（Sticky）：グループ全員の所属バンド確認＆表示ON/OFFパネル */}
+          <div className="sticky top-14 z-20 pt-2 pb-1 -mx-4 px-4 bg-gray-50/95 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-md border border-indigo-100 p-3 space-y-2.5">
+              {/* パネルヘッダー：全体のバンド表示ON/OFFと個別設定ボタン */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Users size={15} className="text-indigo-600 shrink-0" />
+                  <span className="text-xs font-bold text-gray-800 truncate">
+                    メンバーの所属バンド
+                  </span>
+                  <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full font-bold border border-indigo-100 shrink-0">
+                    表示 {visibleBands.length}/{categoryFilteredBands.length}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {showBandPanel && categoryFilteredBands.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsManagingBandVisibility(!isManagingBandVisibility)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
+                        isManagingBandVisibility
+                          ? 'bg-amber-500 text-white border-amber-600'
+                          : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                      }`}
+                    >
+                      {isManagingBandVisibility ? '個別設定を完了' : '個別ON/OFF'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowBandPanel(!showBandPanel)}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border transition-colors ${
+                      showBandPanel
+                        ? 'bg-indigo-600 text-white border-indigo-700'
+                        : 'bg-gray-100 text-gray-600 border-gray-200'
+                    }`}
+                  >
+                    {showBandPanel ? <Eye size={12} /> : <EyeOff size={12} />}
+                    <span>バンド表示: {showBandPanel ? 'ON' : 'OFF'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {showBandPanel && (
+                <>
+                  {/* バンド種別選択タブ */}
+                  <div className="flex gap-1 overflow-x-auto pb-0.5">
+                    {['すべて', ...BAND_CATEGORIES].map(cat => {
+                      const count = cat === 'すべて'
+                        ? allGroupBands.length
+                        : allGroupBands.filter(b => b.category === cat).length;
+                      return (
+                        <button
+                          type="button"
+                          key={cat}
+                          onClick={() => setSelectedBandCategoryFilter(cat)}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap border transition-all ${
+                            selectedBandCategoryFilter === cat
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                              : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                          }`}
+                        >
+                          {cat} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* 個別バンドON/OFF設定モード時の案内と一括ボタン */}
+                  {isManagingBandVisibility && categoryFilteredBands.length > 0 && (
+                    <div className="flex items-center justify-between bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-xl text-[10px]">
+                      <span className="text-amber-800 font-bold">各バンドをタップして表示(ON)/非表示(OFF)を切替</span>
+                      <div className="flex gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const keysToShow = categoryFilteredBands.map(b => b.key);
+                            setHiddenBandKeys(prev => prev.filter(k => !keysToShow.includes(k)));
+                          }}
+                          className="bg-white text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded font-bold"
+                        >
+                          すべてON
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const keysToHide = categoryFilteredBands.map(b => b.key);
+                            setHiddenBandKeys(prev => Array.from(new Set([...prev, ...keysToHide])));
+                          }}
+                          className="bg-white text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded font-bold"
+                        >
+                          すべてOFF
+                        </button>
                       </div>
+                    </div>
+                  )}
+
+                  {/* バンド一覧表示エリア（スクロール可能） */}
+                  <div className="max-h-32 overflow-y-auto pr-0.5">
+                    {categoryFilteredBands.length === 0 ? (
+                      <p className="text-[11px] text-gray-400 text-center py-2">
+                        「{selectedBandCategoryFilter}」に登録されているバンドはありません
+                      </p>
+                    ) : isManagingBandVisibility ? (
                       <div className="flex flex-wrap gap-1.5">
-                        {sItem.periods.map(p => (
-                          <div 
-                            key={p.period} 
-                            className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 border ${
-                              p.category === 1 
-                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
-                                : 'bg-blue-50 text-blue-800 border-blue-200'
-                            }`}
+                        {categoryFilteredBands.map(b => {
+                          const isHidden = hiddenBandKeys.includes(b.key);
+                          return (
+                            <button
+                              type="button"
+                              key={b.key}
+                              onClick={() => toggleBandVisibility(b.key)}
+                              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-[11px] border transition-all ${
+                                isHidden
+                                  ? 'bg-gray-100 text-gray-400 border-gray-200 opacity-60'
+                                  : 'bg-white text-gray-800 border-indigo-300 shadow-sm'
+                              }`}
+                            >
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                isHidden ? 'bg-gray-300 text-gray-600' : 'bg-indigo-600 text-white'
+                              }`}>
+                                {isHidden ? 'OFF' : 'ON'}
+                              </span>
+                              <span className="font-bold">{b.name}</span>
+                              <span className="text-[10px] text-gray-500">({b.members.join(', ')})</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : visibleBands.length === 0 ? (
+                      <div className="text-center py-2 space-y-1">
+                        <p className="text-[11px] text-gray-400">表示がすべてOFFになっています</p>
+                        <button
+                          type="button"
+                          onClick={() => setIsManagingBandVisibility(true)}
+                          className="text-[10px] text-indigo-600 font-bold underline"
+                        >
+                          個別ON/OFF設定を開く
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {visibleBands.map(b => (
+                          <div
+                            key={b.key}
+                            className="inline-flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-xl px-2 py-1 text-[11px]"
                           >
-                            <span>{ p.category === 1 ? '◎' : '〇' } {formatPeriod(p.period)}</span>
-                            {p.category === 2 && (
-                              <span className="text-[9px] font-normal text-blue-700">
-                                (△:{p.triangleMembers.map(m => m.displayName).join(',')})
-                              </span>
-                            )}
-                            {p.bossNotice && (
-                              <span className="text-[9px] bg-amber-100 text-amber-800 px-1 py-0.5 rounded border border-amber-300">
-                                ※{p.bossNotice}
-                              </span>
-                            )}
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${getBandCategoryBadgeStyle(b.category)}`}>
+                              {b.category}
+                            </span>
+                            <span className="font-bold text-gray-900">{b.name}</span>
+                            <span className="text-[10px] text-indigo-700 font-medium">
+                              ({b.members.join(', ')})
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => toggleBandVisibility(b.key)}
+                              className="ml-0.5 p-0.5 text-gray-400 hover:text-red-500 rounded"
+                              title="このバンドを非表示(OFF)にする"
+                            >
+                              <X size={11} />
+                            </button>
                           </div>
                         ))}
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            <div className="mt-2.5 pt-2 border-t border-emerald-200/60 flex items-center gap-3 text-[10px] text-emerald-900">
-              <span><strong>◎</strong>：全員が完全OK</span>
-              <span><strong>〇</strong>：全員参加可（△メンバー含む）</span>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
-          <div className="flex bg-gray-200/80 p-1 rounded-xl gap-1">
-            <button 
-              onClick={() => setListFilter('all')} 
-              className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${listFilter === 'all' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-600'}`}
-            >
-              すべて表示
-            </button>
-            <button 
-              onClick={() => setListFilter('allOk')} 
-              className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${listFilter === 'allOk' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-600'}`}
-            >
-              全員OK(◎・〇)のみ
-            </button>
-            <button 
-              onClick={() => setListFilter('perfectOnly')} 
-              className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${listFilter === 'perfectOnly' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-600'}`}
-            >
-              ◎全員参加のみ
-            </button>
-          </div>
-
-          <div className="bg-white p-3 rounded-xl shadow-sm border text-xs space-y-1.5">
-            <div className="font-bold text-gray-700 mb-2 border-b pb-1">状況の見方</div>
-            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">◎ 全員参加</span> 全員が「〇」の枠</div>
-            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">〇 全員OK</span> 全員参加できるが「△」を含む</div>
-            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-bold">△ 一部NG</span> 欠席者がいるが、参加者は全員「〇」</div>
-            <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-red-100 text-red-700 font-bold">▲ 要調整</span> 欠席者がおり、参加者にも「△」を含む</div>
-          </div>
-
-          {filteredList.length === 0 ? (
-            <div className="p-8 text-center bg-white rounded-2xl border border-gray-100 text-gray-500 text-sm">
-              条件に一致する枠はありません。
+          {list.length === 0 ? (
+            <div className="p-8 text-center text-gray-500 bg-white rounded-2xl border border-gray-100">
+              直近60日で1人でも参加できる枠はありません。
             </div>
           ) : (
-            filteredList.map((item, idx) => (
-              <div key={idx} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-                <div className="border-b border-gray-50 pb-2 mb-3">
-                  <span className="text-sm text-gray-500">{item.date.getFullYear()}年</span>
-                  <span className="text-lg font-bold text-gray-800 ml-1">
-                    {item.date.getMonth()+1}/{item.date.getDate()} 
-                    <span className="text-sm text-gray-500 ml-1">({['日','月','火','水','木','金','土'][item.date.getDay()]})</span>
+            <>
+              <div className="bg-emerald-50/90 border-2 border-emerald-300 rounded-2xl p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-emerald-200">
+                  <div className="flex items-center gap-1.5">
+                    <Check size={18} className="text-emerald-600" strokeWidth={3} />
+                    <h3 className="font-bold text-emerald-950 text-sm">全員空いている日時まとめ（直近60日）</h3>
+                  </div>
+                  <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-bold">
+                    {allAvailableSummary.length}日該当
                   </span>
                 </div>
-                <div className="space-y-3">
-                  {item.dayPeriods.map(dp => {
-                    let badge = '';
-                    if (dp.category === 1) badge = <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">◎ 全員参加</span>;
-                    else if (dp.category === 2) badge = <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">〇 全員OK(△有)</span>;
-                    else if (dp.category === 3) badge = <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">△ 一部NG(残〇)</span>;
-                    else if (dp.category === 4) badge = <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">▲ 要調整(△有)</span>;
 
-                    return (
-                      <div key={dp.period} className="flex flex-col gap-1.5 p-2.5 rounded-xl border bg-gray-50 border-gray-100">
-                        <div className="flex items-center gap-3">
-                          <span className="font-bold text-gray-800 w-12 text-center text-sm">{formatPeriod(dp.period)}</span>
-                          {badge}
+                {allAvailableSummary.length === 0 ? (
+                  <p className="text-xs text-emerald-800 py-2 text-center">
+                    直近60日間でメンバー全員が揃う枠（×が0人の枠）はまだありません。
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {allAvailableSummary.map((sItem, sIdx) => {
+                      const dayOfWeek = ['日','月','火','水','木','金','土'][sItem.date.getDay()];
+                      const dayColor = sItem.date.getDay() === 0 ? 'text-red-600' : sItem.date.getDay() === 6 ? 'text-blue-600' : 'text-gray-800';
+                      return (
+                        <div key={sIdx} className="bg-white p-2.5 rounded-xl border border-emerald-200 flex flex-col gap-1.5 shadow-sm">
+                          <div className="flex items-center justify-between">
+                            <span className={`font-bold text-xs ${dayColor}`}>
+                              {sItem.date.getMonth() + 1}/{sItem.date.getDate()} ({dayOfWeek})
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {sItem.periods.map(p => (
+                              <div 
+                                key={p.period} 
+                                className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 border ${
+                                  p.category === 1 
+                                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                                    : 'bg-blue-50 text-blue-800 border-blue-200'
+                                }`}
+                              >
+                                <span>{ p.category === 1 ? '◎' : '〇' } {formatPeriod(p.period)}</span>
+                                {p.category === 2 && (
+                                  <span className="text-[9px] font-normal text-blue-700">
+                                    (△:{p.triangleMembers.map(m => m.displayName).join(',')})
+                                  </span>
+                                )}
+                                {p.bossNotice && (
+                                  <span className="text-[9px] bg-amber-100 text-amber-800 px-1 py-0.5 rounded border border-amber-300">
+                                    ※{p.bossNotice}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        
-                        {dp.bossNotice && (
-                          <div className="text-xs font-bold text-gray-800 ml-14 bg-white p-2 rounded-lg flex items-center gap-1.5 border border-gray-200 shadow-sm">
-                            <AlertTriangle size={14} className="shrink-0 text-amber-500" />
-                            <span>【{formatPeriod(dp.period)}】管理者連絡: {dp.bossNotice}</span>
-                          </div>
-                        )}
-
-                        {(dp.xMembers.length > 0 || dp.triangleMembers.length > 0 || dp.okMembers.length > 0) && (
-                          <div className="text-[11px] ml-14 space-y-0.5 mt-1">
-                            {dp.xMembers.length > 0 && (
-                              <div className="text-red-600">
-                                <span className="font-bold">×({dp.xMembers.length}人):</span> {dp.xMembers.map(m => m.displayName).join(', ')}
-                              </div>
-                            )}
-                            {dp.triangleMembers.length > 0 && (
-                              <div className="text-amber-600">
-                                <span className="font-bold">△({dp.triangleMembers.length}人):</span> {dp.triangleMembers.map(m => m.displayName).join(', ')}
-                              </div>
-                            )}
-                            {dp.okMembers.length > 0 && (
-                              <div className="text-blue-600">
-                                <span className="font-bold">〇 臨時({dp.okMembers.length}人):</span> {dp.okMembers.map(m => m.displayName).join(', ')}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="mt-2.5 pt-2 border-t border-emerald-200/60 flex items-center gap-3 text-[10px] text-emerald-900">
+                  <span><strong>◎</strong>：全員が完全OK</span>
+                  <span><strong>〇</strong>：全員参加可（△メンバー含む）</span>
                 </div>
               </div>
-            ))
+
+              <div className="flex bg-gray-200/80 p-1 rounded-xl gap-1">
+                <button 
+                  onClick={() => setListFilter('all')} 
+                  className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${listFilter === 'all' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-600'}`}
+                >
+                  すべて表示
+                </button>
+                <button 
+                  onClick={() => setListFilter('allOk')} 
+                  className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${listFilter === 'allOk' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-600'}`}
+                >
+                  全員OK(◎・〇)のみ
+                </button>
+                <button 
+                  onClick={() => setListFilter('perfectOnly')} 
+                  className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${listFilter === 'perfectOnly' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-600'}`}
+                >
+                  ◎全員参加のみ
+                </button>
+              </div>
+
+              <div className="bg-white p-3 rounded-xl shadow-sm border text-xs space-y-1.5">
+                <div className="font-bold text-gray-700 mb-2 border-b pb-1">状況の見方</div>
+                <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">◎ 全員参加</span> 全員が「〇」の枠</div>
+                <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">〇 全員OK</span> 全員参加できるが「△」を含む</div>
+                <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-bold">△ 一部NG</span> 欠席者がいるが、参加者は全員「〇」</div>
+                <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-red-100 text-red-700 font-bold">▲ 要調整</span> 欠席者がおり、参加者にも「△」を含む</div>
+              </div>
+
+              {filteredList.length === 0 ? (
+                <div className="p-8 text-center bg-white rounded-2xl border border-gray-100 text-gray-500 text-sm">
+                  条件に一致する枠はありません。
+                </div>
+              ) : (
+                filteredList.map((item, idx) => (
+                  <div key={idx} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                    <div className="border-b border-gray-50 pb-2 mb-3">
+                      <span className="text-sm text-gray-500">{item.date.getFullYear()}年</span>
+                      <span className="text-lg font-bold text-gray-800 ml-1">
+                        {item.date.getMonth()+1}/{item.date.getDate()} 
+                        <span className="text-sm text-gray-500 ml-1">({['日','月','火','水','木','金','土'][item.date.getDay()]})</span>
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      {item.dayPeriods.map(dp => {
+                        let badge = '';
+                        if (dp.category === 1) badge = <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">◎ 全員参加</span>;
+                        else if (dp.category === 2) badge = <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">〇 全員OK(△有)</span>;
+                        else if (dp.category === 3) badge = <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">△ 一部NG(残〇)</span>;
+                        else if (dp.category === 4) badge = <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">▲ 要調整(△有)</span>;
+
+                        return (
+                          <div key={dp.period} className="flex flex-col gap-1.5 p-2.5 rounded-xl border bg-gray-50 border-gray-100">
+                            <div className="flex items-center gap-3">
+                              <span className="font-bold text-gray-800 w-12 text-center text-sm">{formatPeriod(dp.period)}</span>
+                              {badge}
+                            </div>
+                            
+                            {dp.bossNotice && (
+                              <div className="text-xs font-bold text-gray-800 ml-14 bg-white p-2 rounded-lg flex items-center gap-1.5 border border-gray-200 shadow-sm">
+                                <AlertTriangle size={14} className="shrink-0 text-amber-500" />
+                                <span>【{formatPeriod(dp.period)}】管理者連絡: {dp.bossNotice}</span>
+                              </div>
+                            )}
+
+                            {(dp.xMembers.length > 0 || dp.triangleMembers.length > 0 || dp.okMembers.length > 0) && (
+                              <div className="text-[11px] ml-14 space-y-0.5 mt-1">
+                                {dp.xMembers.length > 0 && (
+                                  <div className="text-red-600">
+                                    <span className="font-bold">×({dp.xMembers.length}人):</span> {dp.xMembers.map(m => m.displayName).join(', ')}
+                                  </div>
+                                )}
+                                {dp.triangleMembers.length > 0 && (
+                                  <div className="text-amber-600">
+                                    <span className="font-bold">△({dp.triangleMembers.length}人):</span> {dp.triangleMembers.map(m => m.displayName).join(', ')}
+                                  </div>
+                                )}
+                                {dp.okMembers.length > 0 && (
+                                  <div className="text-blue-600">
+                                    <span className="font-bold">〇 臨時({dp.okMembers.length}人):</span> {dp.okMembers.map(m => m.displayName).join(', ')}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))
+              )}
+            </>
           )}
         </div>
       );
@@ -1636,7 +1865,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
     return (
       <div className="flex flex-col h-full bg-gray-50">
-        <div className="bg-white p-4 border-b flex items-center gap-3 sticky top-0 z-10 shadow-sm">
+        <div className="bg-white p-4 border-b flex items-center gap-3 shadow-sm">
           <button onClick={() => setActiveGroup(null)} className="p-2 -ml-2 bg-gray-50 rounded-full hover:bg-gray-100"><ChevronLeft size={20} className="text-gray-700" /></button>
           <div className="flex-1 min-w-0">
             {isEditingGroupName ? (
@@ -1744,6 +1973,15 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
   const [isEditingYear, setIsEditingYear] = useState(false);
   const [newYear, setNewYear] = useState(user.year || `${getCurrentAcademicYear()}年度`);
 
+  // ログインID・パスワード表示＆変更用のステート
+  const [showPasswordText, setShowPasswordText] = useState(true);
+  const [isEditingCredentials, setIsEditingCredentials] = useState(false);
+  const [newUsername, setNewUsername] = useState(user.username || '');
+  const [newPassword, setNewPassword] = useState(user.password || '');
+  const [credError, setCredError] = useState('');
+  const [credSuccess, setCredSuccess] = useState('');
+  const [isSavingCreds, setIsSavingCreds] = useState(false);
+
   // 所属バンド追加用のステート
   const [selectedBandCategory, setSelectedBandCategory] = useState(BAND_CATEGORIES[0]);
   const [newBandName, setNewBandName] = useState('');
@@ -1789,6 +2027,57 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
       setIsEditingYear(false);
     } catch (e) {
       alert('入学年度の更新に失敗しました: ' + e.message);
+    }
+  };
+
+  const handleUpdateCredentials = async (e) => {
+    e.preventDefault();
+    setCredError('');
+    setCredSuccess('');
+
+    const trimmedUsername = newUsername.trim();
+    const trimmedPassword = newPassword.trim();
+
+    if (!trimmedUsername || !trimmedPassword) {
+      setCredError('ログインIDとパスワードを入力してください');
+      return;
+    }
+
+    if (user.username === 'Boss' && trimmedUsername !== 'Boss') {
+      setCredError('管理者アカウント(Boss)のログインIDは変更できません（パスワードは変更可能です）');
+      return;
+    }
+
+    if (isSavingCreds) return;
+    setIsSavingCreds(true);
+
+    try {
+      // ログインIDが変更された場合は重複チェック
+      if (trimmedUsername !== user.username) {
+        const q = query(collection(db, "users"), where("username", "==", trimmedUsername));
+        const snap = await getDocs(q);
+        const isTaken = snap.docs.some(d => d.id !== user.id);
+        if (isTaken) {
+          setCredError('このログインIDは既に他のユーザーに使用されています');
+          setIsSavingCreds(false);
+          return;
+        }
+      }
+
+      await updateDoc(doc(db, "users", user.id), {
+        username: trimmedUsername,
+        password: trimmedPassword
+      });
+
+      const updatedUser = { ...user, username: trimmedUsername, password: trimmedPassword };
+      setUser(updatedUser);
+      saveUserToLocalStorage(updatedUser);
+      setIsEditingCredentials(false);
+      setCredSuccess('ログインID・パスワードを更新しました');
+    } catch (err) {
+      setCredError('更新に失敗しました: ' + err.message);
+    } finally {
+      setIsSavingCreds(false);
     }
   };
 
@@ -1933,6 +2222,114 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
         </div>
       </div>
 
+      {/* ログインID ＆ パスワードの表示・変更セクション */}
+      <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 space-y-3">
+        <div className="flex items-center justify-between border-b border-gray-100 pb-2.5">
+          <div className="flex items-center gap-2">
+            <KeyRound size={18} className="text-indigo-600" />
+            <h3 className="font-bold text-gray-800 text-sm">ログインID・パスワード</h3>
+          </div>
+          {!isEditingCredentials && (
+            <button
+              type="button"
+              onClick={() => {
+                setNewUsername(user.username || '');
+                setNewPassword(user.password || '');
+                setCredError('');
+                setCredSuccess('');
+                setIsEditingCredentials(true);
+              }}
+              className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1 rounded-xl flex items-center gap-1 transition-colors"
+            >
+              <Edit2 size={12} /> 変更する
+            </button>
+          )}
+        </div>
+
+        {credSuccess && (
+          <div className="p-2.5 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-xl border border-emerald-200">
+            {credSuccess}
+          </div>
+        )}
+
+        {isEditingCredentials ? (
+          <form onSubmit={handleUpdateCredentials} className="space-y-3 pt-1">
+            {credError && <div className="p-2.5 bg-red-50 text-red-600 text-xs font-bold rounded-xl">{credError}</div>}
+            <div>
+              <label className="block text-[11px] font-bold text-gray-700 mb-1">新しいログインID</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400 text-xs">@</span>
+                <input
+                  type="text"
+                  disabled={user.username === 'Boss'}
+                  className="w-full border border-gray-300 pl-7 pr-3 py-2 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400"
+                  value={newUsername}
+                  onChange={e => setNewUsername(e.target.value)}
+                  required
+                />
+              </div>
+              {user.username === 'Boss' && (
+                <p className="text-[10px] text-gray-400 mt-1">※管理者(Boss)のログインIDは固定されています</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-gray-700 mb-1">新しいパスワード</label>
+              <input
+                type="text"
+                className="w-full border border-gray-300 px-3 py-2 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-indigo-500"
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="submit"
+                disabled={isSavingCreds}
+                className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-xs font-bold shadow-sm hover:bg-indigo-700 transition-colors disabled:opacity-50"
+              >
+                保存する
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditingCredentials(false);
+                  setCredError('');
+                }}
+                className="px-4 bg-gray-100 text-gray-600 py-2 rounded-xl text-xs font-bold hover:bg-gray-200 transition-colors"
+              >
+                キャンセル
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="grid grid-cols-2 gap-2.5 bg-gray-50 p-3 rounded-2xl border border-gray-200 text-xs">
+            <div>
+              <span className="block text-[10px] text-gray-400 font-bold mb-0.5">現在のログインID</span>
+              <span className="font-mono font-bold text-gray-900 text-sm break-all">@{user.username}</span>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-[10px] text-gray-400 font-bold">現在のパスワード</span>
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordText(!showPasswordText)}
+                  className="text-gray-400 hover:text-indigo-600 p-0.5"
+                  title={showPasswordText ? 'パスワードを隠す' : 'パスワードを表示'}
+                >
+                  {showPasswordText ? <EyeOff size={13} /> : <Eye size={13} />}
+                </button>
+              </div>
+              <span className="font-mono font-bold text-gray-900 text-sm break-all">
+                {showPasswordText ? (user.password || '未設定') : '••••••••'}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* 所属バンド管理セクション */}
       <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 space-y-4">
         <div className="flex items-center justify-between border-b border-gray-100 pb-2.5">
@@ -2054,6 +2451,10 @@ function AdminView() {
   const [groups, setGroups] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // 名簿一覧・バンド一覧の折りたたみ用ステート
+  const [isUserListOpen, setIsUserListOpen] = useState(true);
+  const [isGroupListOpen, setIsGroupListOpen] = useState(true);
+
   useEffect(() => {
     if (!db) return;
     const fetchData = async () => {
@@ -2100,13 +2501,25 @@ function AdminView() {
     return matchName || matchUsername || matchGroup || matchProfileBand;
   });
 
+  const filteredGroups = groups.filter(g => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.trim().toLowerCase();
+    const memberUsers = getGroupMemberUsers(g);
+    const matchGroupName = (g.name || '').toLowerCase().includes(q);
+    const matchCode = (g.joinCode || '').toLowerCase().includes(q);
+    const matchMember = memberUsers.some(
+      m => (m.displayName || '').toLowerCase().includes(q) || (m.username || '').toLowerCase().includes(q)
+    );
+    return matchGroupName || matchCode || matchMember;
+  });
+
   return (
-    <div className="p-4 space-y-6">
+    <div className="p-4 space-y-5">
       <div className="bg-red-50 border border-red-200 p-4 rounded-2xl flex items-start gap-3">
         <Shield className="text-red-500 shrink-0 mt-0.5" size={24} />
         <div>
           <h2 className="text-red-800 font-bold">管理者ダッシュボード</h2>
-          <p className="text-xs text-red-600 mt-0.5">各アカウントのログインID・パスワード・所属バンドグループを一括管理できます</p>
+          <p className="text-xs text-red-600 mt-0.5">各見出しをタップして「名簿一覧」「バンド一覧」を折りたたむことができます</p>
         </div>
       </div>
 
@@ -2121,153 +2534,189 @@ function AdminView() {
         />
       </div>
 
-      <div>
-        <h3 className="text-sm font-bold text-gray-800 mb-3 border-b pb-2">
-          全ユーザー一覧 ({filteredUsers.length} / {users.length}人)
-        </h3>
-        <div className="space-y-3">
-          {filteredUsers.map(u => {
-            const joinedGroups = getUserJoinedGroups(u.id);
-            const profileBands = u.bands || [];
+      {/* 折りたたみ可能：名簿一覧（全ユーザー一覧） */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setIsUserListOpen(!isUserListOpen)}
+          className="w-full p-4 bg-gray-50 hover:bg-gray-100 flex items-center justify-between transition-colors text-left"
+        >
+          <div className="flex items-center gap-2">
+            <User size={18} className="text-indigo-600" />
+            <h3 className="text-sm font-bold text-gray-900">
+              名簿一覧・全ユーザー ({filteredUsers.length} / {users.length}人)
+            </h3>
+          </div>
+          <div className="flex items-center gap-1 text-xs font-bold text-gray-500">
+            <span>{isUserListOpen ? '折りたたむ' : '開く'}</span>
+            {isUserListOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </div>
+        </button>
 
-            return (
-              <div key={u.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3">
-                <div className="flex justify-between items-start gap-2">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-bold text-base text-gray-900">{u.displayName}</p>
-                      <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
-                        {formatYearWithGrade(u.year)}
-                      </span>
+        {isUserListOpen && (
+          <div className="p-3 space-y-3 border-t border-gray-100">
+            {filteredUsers.map(u => {
+              const joinedGroups = getUserJoinedGroups(u.id);
+              const profileBands = u.bands || [];
+
+              return (
+                <div key={u.id} className="bg-white p-4 rounded-2xl border border-gray-200 space-y-3 shadow-xs">
+                  <div className="flex justify-between items-start gap-2">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-bold text-base text-gray-900">{u.displayName}</p>
+                        <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                          {formatYearWithGrade(u.year)}
+                        </span>
+                      </div>
+                      {u.parts && u.parts.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {u.parts.map(part => (
+                            <span key={part} className="bg-gray-100 text-gray-600 text-[10px] px-1.5 py-0.5 rounded-md font-medium">
+                              {part}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    {u.parts && u.parts.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {u.parts.map(part => (
-                          <span key={part} className="bg-gray-100 text-gray-600 text-[10px] px-1.5 py-0.5 rounded-md font-medium">
-                            {part}
+                    {u.username !== 'Boss' && (
+                      <button
+                        onClick={() => handleDelete('user', u.id, u.displayName)}
+                        className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors shrink-0"
+                        title="ユーザーを削除"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* ログインID ＆ パスワード表示ボックス */}
+                  <div className="grid grid-cols-2 gap-2 bg-gray-50 p-2.5 rounded-xl border border-gray-200 text-xs">
+                    <div>
+                      <span className="block text-[10px] text-gray-400 font-bold">ログインID</span>
+                      <span className="font-mono font-bold text-gray-800 break-all">@{u.username}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-gray-400 font-bold">パスワード</span>
+                      <span className="font-mono font-bold text-gray-800 break-all">{u.password || '未設定'}</span>
+                    </div>
+                  </div>
+
+                  {/* 参加しているバンドグループ一覧（グループ機能） */}
+                  <div className="pt-1">
+                    <span className="block text-[10px] font-bold text-gray-500 mb-1.5">
+                      参加中のバンドグループ ({joinedGroups.length})
+                    </span>
+                    {joinedGroups.length === 0 ? (
+                      <p className="text-[11px] text-gray-400">参加しているグループはありません</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {joinedGroups.map(g => (
+                          <span
+                            key={g.id}
+                            className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 border border-indigo-200 px-2.5 py-1 rounded-lg text-[11px] font-bold"
+                          >
+                            <Users size={12} className="shrink-0 text-indigo-600" />
+                            <span>{g.name}</span>
+                            <span className="text-[9px] font-mono text-indigo-500 ml-0.5">({g.joinCode})</span>
                           </span>
                         ))}
                       </div>
                     )}
                   </div>
-                  {u.username !== 'Boss' && (
+
+                  {/* マイページで登録している所属バンド一覧 */}
+                  {profileBands.length > 0 && (
+                    <div className="pt-2 border-t border-gray-100">
+                      <span className="block text-[10px] font-bold text-gray-400 mb-1.5">
+                        プロフィール登録バンド ({profileBands.length})
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {profileBands.map((band, bIdx) => (
+                          <div
+                            key={band.id || bIdx}
+                            className="inline-flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-0.5 text-[10px]"
+                          >
+                            <span className={`text-[9px] font-bold px-1 py-0.5 rounded border ${getBandCategoryBadgeStyle(band.category)}`}>
+                              {band.category}
+                            </span>
+                            <span className="font-bold text-gray-700">{band.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 折りたたみ可能：バンド一覧（全グループ一覧） */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setIsGroupListOpen(!isGroupListOpen)}
+          className="w-full p-4 bg-gray-50 hover:bg-gray-100 flex items-center justify-between transition-colors text-left"
+        >
+          <div className="flex items-center gap-2">
+            <Users size={18} className="text-emerald-600" />
+            <h3 className="text-sm font-bold text-gray-900">
+              バンド一覧・全グループ ({filteredGroups.length} / {groups.length}グループ)
+            </h3>
+          </div>
+          <div className="flex items-center gap-1 text-xs font-bold text-gray-500">
+            <span>{isGroupListOpen ? '折りたたむ' : '開く'}</span>
+            {isGroupListOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </div>
+        </button>
+
+        {isGroupListOpen && (
+          <div className="p-3 space-y-3 border-t border-gray-100">
+            {filteredGroups.map(g => {
+              const memberUsers = getGroupMemberUsers(g);
+              return (
+                <div key={g.id} className="bg-white p-4 rounded-2xl border border-gray-200 space-y-2.5 shadow-xs">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="font-bold text-sm text-gray-900">{g.name}</p>
+                      <p className="text-[11px] text-gray-500 mt-0.5">
+                        参加コード: <strong className="font-mono text-gray-800">{g.joinCode}</strong> ・ メンバー {memberUsers.length}人
+                      </p>
+                    </div>
                     <button
-                      onClick={() => handleDelete('user', u.id, u.displayName)}
+                      onClick={() => handleDelete('group', g.id, g.name)}
                       className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors shrink-0"
-                      title="ユーザーを削除"
+                      title="グループを削除"
                     >
                       <Trash2 size={16} />
                     </button>
-                  )}
-                </div>
-
-                {/* ログインID ＆ パスワード表示ボックス */}
-                <div className="grid grid-cols-2 gap-2 bg-gray-50 p-2.5 rounded-xl border border-gray-200 text-xs">
-                  <div>
-                    <span className="block text-[10px] text-gray-400 font-bold">ログインID</span>
-                    <span className="font-mono font-bold text-gray-800 break-all">@{u.username}</span>
                   </div>
-                  <div>
-                    <span className="block text-[10px] text-gray-400 font-bold">パスワード</span>
-                    <span className="font-mono font-bold text-gray-800 break-all">{u.password || '未設定'}</span>
-                  </div>
-                </div>
 
-                {/* 参加しているバンドグループ一覧（グループ機能） */}
-                <div className="pt-1">
-                  <span className="block text-[10px] font-bold text-gray-500 mb-1.5">
-                    参加中のバンドグループ ({joinedGroups.length})
-                  </span>
-                  {joinedGroups.length === 0 ? (
-                    <p className="text-[11px] text-gray-400">参加しているグループはありません</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {joinedGroups.map(g => (
-                        <span
-                          key={g.id}
-                          className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 border border-indigo-200 px-2.5 py-1 rounded-lg text-[11px] font-bold"
-                        >
-                          <Users size={12} className="shrink-0 text-indigo-600" />
-                          <span>{g.name}</span>
-                          <span className="text-[9px] font-mono text-indigo-500 ml-0.5">({g.joinCode})</span>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* マイページで登録している所属バンド一覧 */}
-                {profileBands.length > 0 && (
-                  <div className="pt-2 border-t border-gray-100">
-                    <span className="block text-[10px] font-bold text-gray-400 mb-1.5">
-                      プロフィール登録バンド ({profileBands.length})
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {profileBands.map((band, bIdx) => (
-                        <div
-                          key={band.id || bIdx}
-                          className="inline-flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-0.5 text-[10px]"
-                        >
-                          <span className={`text-[9px] font-bold px-1 py-0.5 rounded border ${getBandCategoryBadgeStyle(band.category)}`}>
-                            {band.category}
+                  {/* グループ所属メンバーの名前一覧 */}
+                  <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                    <span className="block text-[10px] font-bold text-gray-400 mb-1">所属メンバー</span>
+                    {memberUsers.length === 0 ? (
+                      <p className="text-[11px] text-gray-400">メンバーがいません</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {memberUsers.map(m => (
+                          <span
+                            key={m.id}
+                            className="bg-white border border-gray-200 text-gray-800 text-[11px] font-bold px-2 py-0.5 rounded-lg"
+                          >
+                            {m.displayName} <span className="text-[9px] font-normal text-gray-400">(@{m.username})</span>
                           </span>
-                          <span className="font-bold text-gray-700">{band.name}</span>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div>
-        <h3 className="text-sm font-bold text-gray-800 mb-3 border-b pb-2 mt-6">全グループ一覧 ({groups.length})</h3>
-        <div className="space-y-3">
-          {groups.map(g => {
-            const memberUsers = getGroupMemberUsers(g);
-            return (
-              <div key={g.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-2.5">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-bold text-sm text-gray-900">{g.name}</p>
-                    <p className="text-[11px] text-gray-500 mt-0.5">
-                      参加コード: <strong className="font-mono text-gray-800">{g.joinCode}</strong> ・ メンバー {memberUsers.length}人
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleDelete('group', g.id, g.name)}
-                    className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors shrink-0"
-                    title="グループを削除"
-                  >
-                    <Trash2 size={16} />
-                  </button>
                 </div>
-
-                {/* グループ所属メンバーの名前一覧 */}
-                <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-100">
-                  <span className="block text-[10px] font-bold text-gray-400 mb-1">所属メンバー</span>
-                  {memberUsers.length === 0 ? (
-                    <p className="text-[11px] text-gray-400">メンバーがいません</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {memberUsers.map(m => (
-                        <span
-                          key={m.id}
-                          className="bg-white border border-gray-200 text-gray-800 text-[11px] font-bold px-2 py-0.5 rounded-lg"
-                        >
-                          {m.displayName} <span className="text-[9px] font-normal text-gray-400">(@{m.username})</span>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
