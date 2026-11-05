@@ -114,7 +114,7 @@ function TutorialModal({ onClose }) {
               <h3 className="text-lg font-bold text-gray-900">2. 繰り返しと期間設定</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
                 「毎週」「毎月」などの繰り返しは、<strong>「開始日〜終了日」の期間を指定して</strong>登録できるようになりました。<br/><br/>
-                また、<strong>「この日を一括で設定（全日）」</strong>のボタンを使えば、1日丸ごとの予定をまとめて入力・解除できます！
+                また、<strong>「この日を一括で設定（全日）」</strong>のボタンを使えば、1日丸ごとの予定をまとめて入力・切り替え・解除できます！
               </p>
             </div>
           )}
@@ -405,44 +405,8 @@ function MyScheduleView({ user }) {
     fetchSchedules();
   }, [user]);
 
-  const getBossRule = (date, period) => {
-    const rules = bossSchedules.filter(r => r.period === period);
-    const dStr = getLocalYMD(date);
-    
-    const isValidRule = (r) => {
-      if (r.startDate && r.startDate > dStr) return false;
-      if (r.endDate && r.endDate < dStr) return false;
-      return true;
-    };
-
-    const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
-    if (onceRule) return onceRule;
-
-    const findValidRule = (type, condition) => {
-       const validRules = rules.filter(r => r.type === type && condition(r) && isValidRule(r));
-       if (validRules.length === 0) return null;
-       validRules.sort((a, b) => {
-         const sa = a.startDate || '1970-01-01';
-         const sb = b.startDate || '1970-01-01';
-         return sa < sb ? 1 : (sa > sb ? -1 : 0);
-       });
-       return validRules[0];
-    };
-
-    const weeklyRule = findValidRule('weekly', r => r.dayOfWeek === date.getDay());
-    if (weeklyRule) return weeklyRule;
-    
-    const monthlyRule = findValidRule('monthly', r => r.dayOfMonth === date.getDate());
-    if (monthlyRule) return monthlyRule;
-    
-    const dailyRule = findValidRule('daily', r => true);
-    if (dailyRule) return dailyRule;
-    
-    return null;
-  };
-
-  const getScheduleRule = (date, period) => {
-    const rules = mySchedules.filter(r => r.period === period);
+  const computeScheduleRule = (schedulesList, date, period) => {
+    const rules = schedulesList.filter(r => r.period === period);
     const dStr = getLocalYMD(date);
     
     const isValidRule = (r) => {
@@ -477,101 +441,160 @@ function MyScheduleView({ user }) {
     return null;
   };
 
+  const getBossRule = (date, period) => {
+    return computeScheduleRule(bossSchedules, date, period);
+  };
+
+  const getScheduleRule = (date, period) => {
+    return computeScheduleRule(mySchedules, date, period);
+  };
+
   const getPrevDayYMD = (ymdStr) => {
     const [y, m, d] = ymdStr.split('-').map(Number);
     const prev = new Date(y, m - 1, d - 1);
     return getLocalYMD(prev);
   };
 
-  const toggleSchedule = async (date, period, type, newStatus, textVal = '', startDateVal = '', endDateVal = '') => {
-    if (isProcessing) return;
-    setIsProcessing(true);
-    
+  // 1つの時限の予定を「解除(mode='remove')」または「指定のtypeへ設定・切り替え(mode='set')」する共通関数
+  const applyPeriodRuleChange = async (schedulesList, date, period, type, newStatus, textVal, startDateVal, endDateVal, mode) => {
+    let updated = [...schedulesList];
     const dStr = startDateVal || getLocalYMD(date);
-    const rulesOfSameType = mySchedules.filter(r => r.period === period && r.type === type);
-    
-    let activeRule = null;
-    if (type === 'once') {
-        activeRule = rulesOfSameType.find(r => r.date === dStr);
-    } else {
-        const condition = type === 'weekly' ? (r => r.dayOfWeek === date.getDay()) :
-                          type === 'monthly' ? (r => r.dayOfMonth === date.getDate()) :
-                          (r => true);
-        const validRules = rulesOfSameType.filter(r => condition(r) && (!r.startDate || r.startDate <= dStr) && (!r.endDate || r.endDate >= dStr));
-        if (validRules.length > 0) {
-            validRules.sort((a, b) => {
-              const sa = a.startDate || '1970-01-01';
-              const sb = b.startDate || '1970-01-01';
-              return sa < sb ? 1 : (sa > sb ? -1 : 0);
-            });
-            activeRule = validRules[0];
-        }
+    const prevDayStr = getPrevDayYMD(dStr);
+
+    const getValidRecurringRules = (targetType = null) => {
+      return updated.filter(r => {
+        if (r.period !== period || r.type === 'once') return false;
+        if (targetType && r.type !== targetType) return false;
+        if (r.startDate && r.startDate > dStr) return false;
+        if (r.endDate && r.endDate < dStr) return false;
+        if (r.type === 'weekly' && r.dayOfWeek !== date.getDay()) return false;
+        if (r.type === 'monthly' && r.dayOfMonth !== date.getDate()) return false;
+        return true;
+      });
+    };
+
+    const terminateRuleAtDate = async (rule) => {
+      const safeStart = rule.startDate || '2000-01-01';
+      if (rule.type === 'once' || safeStart >= dStr) {
+        await deleteDoc(doc(db, "schedules", rule.id));
+        updated = updated.filter(r => r.id !== rule.id);
+      } else {
+        await updateDoc(doc(db, "schedules", rule.id), { endDate: prevDayStr });
+        updated = updated.map(r => r.id === rule.id ? { ...r, endDate: prevDayStr } : r);
+      }
+    };
+
+    if (mode === 'remove') {
+      const currentDisplayed = computeScheduleRule(updated, date, period);
+      if (currentDisplayed) {
+        await terminateRuleAtDate(currentDisplayed);
+      }
+      return updated;
     }
 
-    try {
-      let newSchedules = [...mySchedules];
-      
-      if (activeRule) {
-        const currentStatus = activeRule.status || 'x';
-        const currentText = activeRule.text || '';
-        const currentEndDate = activeRule.endDate || '';
-        const safeStartDate = activeRule.startDate || '2000-01-01';
-        
-        if ((currentStatus === newStatus && currentText === textVal && currentEndDate === endDateVal) || (!activeRule.status && newStatus === 'x' && !textVal && !endDateVal)) {
-            if (type === 'once' || safeStartDate >= dStr) {
-                setMySchedules(newSchedules.filter(r => r.id !== activeRule.id));
-                await deleteDoc(doc(db, "schedules", activeRule.id));
-            } else {
-                const prevDayStr = getPrevDayYMD(dStr);
-                await updateDoc(doc(db, "schedules", activeRule.id), { endDate: prevDayStr });
-                const idx = newSchedules.findIndex(r => r.id === activeRule.id);
-                if (idx >= 0) newSchedules[idx] = { ...newSchedules[idx], endDate: prevDayStr };
-                setMySchedules(newSchedules);
-            }
+    // mode === 'set'（設定・別タイプへの切り替え）
+    if (type === 'once') {
+      // その日以降を開始日とする繰り返しルールがあれば削除して「この日」に置き換える
+      const sameDayRecurring = getValidRecurringRules().filter(r => (r.startDate || '2000-01-01') >= dStr);
+      for (const r of sameDayRecurring) {
+        await deleteDoc(doc(db, "schedules", r.id));
+        updated = updated.filter(item => item.id !== r.id);
+      }
+
+      const existingOnce = updated.find(r => r.period === period && r.type === 'once' && r.date === dStr);
+      if (existingOnce) {
+        await updateDoc(doc(db, "schedules", existingOnce.id), { status: newStatus, text: textVal });
+        updated = updated.map(r => r.id === existingOnce.id ? { ...r, status: newStatus, text: textVal } : r);
+      } else {
+        const newRule = { userId: user.id, period, type: 'once', date: dStr, status: newStatus, text: textVal, startDate: dStr, endDate: '' };
+        const docRef = await addDoc(collection(db, "schedules"), newRule);
+        updated.push({ id: docRef.id, ...newRule });
+      }
+    } else {
+      // 繰り返し（weekly, monthly, daily）への設定・切り替え
+      // 1. その日の「この日(once)」ルールが存在していれば削除（onceが残ると優先されて繰り返しに切り替わらないため）
+      const existingOnce = updated.find(r => r.period === period && r.type === 'once' && r.date === dStr);
+      if (existingOnce) {
+        await deleteDoc(doc(db, "schedules", existingOnce.id));
+        updated = updated.filter(r => r.id !== existingOnce.id);
+      }
+
+      // 2. 異なる種類の有効な繰り返しルール（例：毎週にする時の毎月・毎日など）があれば終了/削除
+      const otherRecurring = getValidRecurringRules().filter(r => r.type !== type);
+      for (const r of otherRecurring) {
+        await terminateRuleAtDate(r);
+      }
+
+      // 3. 同じ種類の繰り返しルールを更新または新規作成
+      const sameTypeRecurring = getValidRecurringRules(type);
+      if (sameTypeRecurring.length > 0) {
+        sameTypeRecurring.sort((a, b) => ((a.startDate || '1970-01-01') < (b.startDate || '1970-01-01') ? 1 : -1));
+        const targetRule = sameTypeRecurring[0];
+        for (let i = 1; i < sameTypeRecurring.length; i++) {
+          await terminateRuleAtDate(sameTypeRecurring[i]);
+        }
+
+        const safeStart = targetRule.startDate || '2000-01-01';
+        if (safeStart >= dStr) {
+          const updatePayload = { status: newStatus, text: textVal, startDate: dStr, endDate: endDateVal };
+          await updateDoc(doc(db, "schedules", targetRule.id), updatePayload);
+          updated = updated.map(r => r.id === targetRule.id ? { ...r, ...updatePayload } : r);
         } else {
-            if (type === 'once' || safeStartDate >= dStr) {
-                const updatePayload = { status: newStatus, text: textVal };
-                if (type !== 'once') {
-                  updatePayload.startDate = dStr;
-                  updatePayload.endDate = endDateVal;
-                }
-                await updateDoc(doc(db, "schedules", activeRule.id), updatePayload);
-                const idx = newSchedules.findIndex(r => r.id === activeRule.id);
-                if (idx >= 0) newSchedules[idx] = { ...newSchedules[idx], ...updatePayload };
-                setMySchedules(newSchedules);
-            } else {
-                const prevDayStr = getPrevDayYMD(dStr);
-                await updateDoc(doc(db, "schedules", activeRule.id), { endDate: prevDayStr });
-                let newRule = { userId: user.id, period, type, status: newStatus, text: textVal, startDate: dStr, endDate: endDateVal };
-                if (type === 'weekly') newRule.dayOfWeek = date.getDay();
-                if (type === 'monthly') newRule.dayOfMonth = date.getDate();
-                
-                const docRef = await addDoc(collection(db, "schedules"), newRule);
-                newSchedules = newSchedules.map(r => r.id === activeRule.id ? { ...r, endDate: prevDayStr } : r);
-                newSchedules.push({ id: docRef.id, ...newRule });
-                setMySchedules(newSchedules);
-            }
+          await updateDoc(doc(db, "schedules", targetRule.id), { endDate: prevDayStr });
+          updated = updated.map(r => r.id === targetRule.id ? { ...r, endDate: prevDayStr } : r);
+
+          let newRule = { userId: user.id, period, type, status: newStatus, text: textVal, startDate: dStr, endDate: endDateVal };
+          if (type === 'weekly') newRule.dayOfWeek = date.getDay();
+          if (type === 'monthly') newRule.dayOfMonth = date.getDate();
+          const docRef = await addDoc(collection(db, "schedules"), newRule);
+          updated.push({ id: docRef.id, ...newRule });
         }
       } else {
         let newRule = { userId: user.id, period, type, status: newStatus, text: textVal, startDate: dStr, endDate: endDateVal };
-        if (type === 'once') newRule.date = dStr;
         if (type === 'weekly') newRule.dayOfWeek = date.getDay();
         if (type === 'monthly') newRule.dayOfMonth = date.getDate();
-        
-        const tempId = 'temp_' + Date.now();
-        setMySchedules([...newSchedules, { id: tempId, ...newRule }]);
-        
         const docRef = await addDoc(collection(db, "schedules"), newRule);
-        setMySchedules(prev => prev.map(r => r.id === tempId ? { id: docRef.id, ...newRule } : r));
+        updated.push({ id: docRef.id, ...newRule });
       }
-      
+    }
+
+    return updated;
+  };
+
+  const toggleSchedule = async (date, period, type, newStatus, textVal = '', startDateVal = '', endDateVal = '') => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+
+    try {
+      const currentDisplayed = computeScheduleRule(mySchedules, date, period);
+      const isSameAlreadyDisplayed = currentDisplayed &&
+        currentDisplayed.type === type &&
+        (currentDisplayed.status || 'x') === newStatus &&
+        (currentDisplayed.text || '') === textVal &&
+        (type === 'once' || (currentDisplayed.endDate || '') === endDateVal);
+
+      const mode = isSameAlreadyDisplayed ? 'remove' : 'set';
+      const updatedSchedules = await applyPeriodRuleChange(
+        mySchedules,
+        date,
+        period,
+        type,
+        newStatus,
+        textVal,
+        startDateVal,
+        endDateVal,
+        mode
+      );
+
+      setMySchedules(updatedSchedules);
+
       if (user.username === 'Boss') {
         const bossQ = query(collection(db, "schedules"), where("userId", "==", user.id));
         const bossSnap = await getDocs(bossQ);
         setBossSchedules(bossSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       }
-    } catch(e) { 
-      alert("更新エラー: " + e.message); 
+    } catch (e) {
+      alert("更新エラー: " + e.message);
     } finally {
       setIsProcessing(false);
     }
@@ -582,98 +605,43 @@ function MyScheduleView({ user }) {
     setIsProcessing(true);
 
     const periods = getPeriodListForDate(selectedDate);
-    const dStr = startDateVal || getLocalYMD(selectedDate);
+    const isBoss = user.username === 'Boss';
+    const textVal = isBoss ? customText : '';
+
+    // 現在画面上で、すべての時限がすでに指定の type / status / text / endDate で表示されているか確認
+    const isAllAlreadyDisplayed = periods.every(period => {
+      const currentDisplayed = computeScheduleRule(mySchedules, selectedDate, period);
+      return currentDisplayed &&
+        currentDisplayed.type === type &&
+        (currentDisplayed.status || 'x') === inputStatus &&
+        (currentDisplayed.text || '') === textVal &&
+        (type === 'once' || (currentDisplayed.endDate || '') === endDateVal);
+    });
+
+    const mode = isAllAlreadyDisplayed ? 'remove' : 'set';
     let updatedSchedules = [...mySchedules];
     let hasError = false;
     let errorMessage = "";
-    
-    const getActiveRuleForType = (period, targetType) => {
-        const rulesOfSameType = updatedSchedules.filter(r => r.period === period && r.type === targetType);
-        if (targetType === 'once') {
-            return rulesOfSameType.find(r => r.date === dStr);
-        } else {
-            const condition = targetType === 'weekly' ? (r => r.dayOfWeek === selectedDate.getDay()) :
-                              targetType === 'monthly' ? (r => r.dayOfMonth === selectedDate.getDate()) :
-                              (r => true);
-            const validRules = rulesOfSameType.filter(r => condition(r) && (!r.startDate || r.startDate <= dStr) && (!r.endDate || r.endDate >= dStr));
-            if (validRules.length > 0) {
-                validRules.sort((a, b) => {
-                  const sa = a.startDate || '1970-01-01';
-                  const sb = b.startDate || '1970-01-01';
-                  return sa < sb ? 1 : (sa > sb ? -1 : 0);
-                });
-                return validRules[0];
-            }
-            return null;
-        }
-    };
 
-    const isAllSet = periods.every(period => {
-      const rule = getActiveRuleForType(period, type);
-      return rule && (rule.status === inputStatus || (!rule.status && inputStatus === 'x'));
-    });
-    
     for (const period of periods) {
       try {
-        const activeRule = getActiveRuleForType(period, type);
-
-        if (isAllSet) {
-          if (activeRule) {
-             const safeStartDate = activeRule.startDate || '2000-01-01';
-             if (type === 'once' || safeStartDate >= dStr) {
-                await deleteDoc(doc(db, "schedules", activeRule.id));
-                updatedSchedules = updatedSchedules.filter(r => r.id !== activeRule.id);
-             } else {
-                const prevDayStr = getPrevDayYMD(dStr);
-                await updateDoc(doc(db, "schedules", activeRule.id), { endDate: prevDayStr });
-                const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
-                if (idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], endDate: prevDayStr };
-             }
-          }
-        } else {
-          if (activeRule) {
-             const currentStatus = activeRule.status || 'x';
-             const safeStartDate = activeRule.startDate || '2000-01-01';
-             if (currentStatus !== inputStatus || activeRule.endDate !== endDateVal) {
-                 if (type === 'once' || safeStartDate >= dStr) {
-                     const updatePayload = { status: inputStatus, text: '' };
-                     if (type !== 'once') {
-                       updatePayload.startDate = dStr;
-                       updatePayload.endDate = endDateVal;
-                     }
-                     await updateDoc(doc(db, "schedules", activeRule.id), updatePayload);
-                     const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
-                     if (idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], ...updatePayload };
-                 } else {
-                     const prevDayStr = getPrevDayYMD(dStr);
-                     await updateDoc(doc(db, "schedules", activeRule.id), { endDate: prevDayStr });
-                     const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
-                     if (idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], endDate: prevDayStr };
-                     
-                     let newRule = { userId: user.id, period, type, status: inputStatus, text: '', startDate: dStr, endDate: endDateVal };
-                     if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
-                     if (type === 'monthly') newRule.dayOfMonth = selectedDate.getDate();
-                     
-                     const docRef = await addDoc(collection(db, "schedules"), newRule);
-                     updatedSchedules.push({ id: docRef.id, ...newRule });
-                 }
-             }
-          } else {
-             let newRule = { userId: user.id, period, type, status: inputStatus, text: '', startDate: dStr, endDate: endDateVal };
-             if (type === 'once') newRule.date = dStr;
-             if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
-             if (type === 'monthly') newRule.dayOfMonth = selectedDate.getDate();
-             
-             const docRef = await addDoc(collection(db, "schedules"), newRule);
-             updatedSchedules.push({ id: docRef.id, ...newRule });
-          }
-        }
+        updatedSchedules = await applyPeriodRuleChange(
+          updatedSchedules,
+          selectedDate,
+          period,
+          type,
+          inputStatus,
+          textVal,
+          startDateVal,
+          endDateVal,
+          mode
+        );
       } catch (err) {
         hasError = true;
         errorMessage = err.message;
       }
     }
-    
+
     setMySchedules(updatedSchedules);
     if (user.username === 'Boss') {
       const bossQ = query(collection(db, "schedules"), where("userId", "==", user.id));
@@ -708,7 +676,7 @@ function MyScheduleView({ user }) {
       toggleSchedule(date, period, type, newStatus, textVal, defaultStart, '');
     } else {
       const existingRule = getScheduleRule(date, period);
-      const isAlreadySameType = existingRule && existingRule.type === type && !existingRule.isOverride;
+      const isAlreadySameType = existingRule && existingRule.type === type;
       setConfirmDialog({
         type: 'periodInput',
         title: isAlreadySameType ? '繰り返し予定の変更・解除' : '繰り返し期間の指定',
@@ -729,7 +697,7 @@ function MyScheduleView({ user }) {
       setConfirmDialog({
         title: '1日一括設定の確認',
         message: `「${getTypeLabel(type, selectedDate)}」の【すべての時限（全日）】に「${getStatusLabel(inputStatus)}」を一括で設定（または解除）しますか？`,
-        subMessage: '※この日のすべての時限が変更されます。',
+        subMessage: '※他の繰り返し設定になっている枠も、すべて「この日」に切り替わります。',
         onConfirm: () => {
           setConfirmDialog(null);
           handleSetAllDay(type, defaultStart, '');
@@ -858,6 +826,10 @@ function MyScheduleView({ user }) {
             {['once:この日', 'weekly:毎週', 'monthly:毎月', 'daily:毎日'].map(t => {
               const [type, label] = t.split(':');
               const isDisabled = (inputStatus === 'ok' || inputStatus === 'studio1' || inputStatus === 'studio2') && type !== 'once';
+              const isAllSetForThisType = periods.every(period => {
+                const r = getScheduleRule(selectedDate, period);
+                return r && r.type === type && (r.status || 'x') === inputStatus;
+              });
 
               return (
                 <button 
@@ -866,7 +838,9 @@ function MyScheduleView({ user }) {
                   disabled={isDisabled}
                   className={`flex-1 py-2 text-[10px] font-bold rounded-lg transition-colors border ${
                     isDisabled ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-50' :
-                    'bg-white border-indigo-200 text-indigo-700 hover:bg-indigo-50'
+                    isAllSetForThisType
+                      ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                      : 'bg-white border-indigo-200 text-indigo-700 hover:bg-indigo-50'
                   }`}
                 >
                   {label}
@@ -1000,7 +974,7 @@ function MyScheduleView({ user }) {
                       onChange={(e) => setConfirmDialog({ ...confirmDialog, endDate: e.target.value })}
                     />
                   </div>
-                  <p className="text-[10px] text-gray-500">※すでに同じ予定が登録されている場合は、そのまま「決定して実行」を押すと予定を解除できます。</p>
+                  <p className="text-[10px] text-gray-500">※他の種類（この日など）が設定されている枠も、すべてこの設定に切り替わります。</p>
                 </div>
                 <div className="flex gap-2 pt-1">
                   <button
