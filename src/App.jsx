@@ -864,7 +864,7 @@ function MyScheduleView({ user }) {
                   className={`flex-1 py-2 text-[10px] font-bold rounded-lg transition-colors border ${
                     isDisabled ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-50' :
                     isAllSetForThisType
-                      ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                      ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm'
                       : 'bg-white border-indigo-200 text-indigo-700 hover:bg-indigo-50'
                   }`}
                 >
@@ -965,7 +965,7 @@ function MyScheduleView({ user }) {
       {renderDayDetail()}
 
       {confirmDialog && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 duration-150">
             <div className="flex items-center gap-2 text-indigo-600 mb-3">
               <AlertTriangle size={22} className="shrink-0" />
@@ -1464,7 +1464,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                               </span>
                             )}
                             {p.bossNotice && (
-                              <span className="text-[9px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded border border-amber-300">
+                              <span className="text-[9px] bg-amber-100 text-amber-800 px-1 py-0.5 rounded border border-amber-300">
                                 ※{p.bossNotice}
                               </span>
                             )}
@@ -1594,7 +1594,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                   <h4 className="font-bold text-gray-900 truncate">{m.displayName}</h4>
                   <span className="text-[10px] text-gray-400">@{m.username}</span>
                 </div>
-                {/* 入学年度と自動計算された回生を表示 */}
                 <div className="text-xs font-medium text-indigo-600 mt-0.5">
                   {formatYearWithGrade(m.year)}
                 </div>
@@ -1899,7 +1898,7 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
               </select>
               <button
                 onClick={handleUpdateYear}
-                className="bg-indigo-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-xs"
+                className="bg-indigo-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm"
               >
                 保存
               </button>
@@ -1988,7 +1987,7 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
                   onClick={() => setSelectedBandCategory(cat)}
                   className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border transition-all ${
                     selectedBandCategory === cat
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
                       : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
                   }`}
                 >
@@ -2011,7 +2010,7 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
               <button
                 type="submit"
                 disabled={isUpdatingBands}
-                className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-xs hover:bg-indigo-700 transition-colors flex items-center gap-1 shrink-0 disabled:opacity-50"
+                className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm hover:bg-indigo-700 transition-colors flex items-center gap-1 shrink-0 disabled:opacity-50"
               >
                 <Plus size={14} /> 追加
               </button>
@@ -2053,6 +2052,7 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
 function AdminView() {
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     if (!db) return;
@@ -2065,7 +2065,8 @@ function AdminView() {
     fetchData();
   }, []);
 
-  const handleDelete = async (type, id) => {
+  const handleDelete = async (type, id, labelName) => {
+    if (!window.confirm(`「${labelName}」を削除してもよろしいですか？`)) return;
     try {
       if (type === 'user') {
         await deleteDoc(doc(db, "users", id));
@@ -2077,35 +2078,195 @@ function AdminView() {
     } catch(e) { alert("削除に失敗しました"); }
   };
 
+  // ユーザーが参加しているバンドグループ一覧を取得
+  const getUserJoinedGroups = (userId) => {
+    return groups.filter(g => Array.isArray(g.members) && g.members.includes(userId));
+  };
+
+  // グループに参加しているメンバー一覧を取得（Bossを除く）
+  const getGroupMemberUsers = (group) => {
+    if (!Array.isArray(group.members)) return [];
+    return users.filter(u => group.members.includes(u.id) && u.username !== 'Boss');
+  };
+
+  const filteredUsers = users.filter(u => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.trim().toLowerCase();
+    const joinedGroups = getUserJoinedGroups(u.id);
+    const matchName = (u.displayName || '').toLowerCase().includes(q);
+    const matchUsername = (u.username || '').toLowerCase().includes(q);
+    const matchGroup = joinedGroups.some(g => (g.name || '').toLowerCase().includes(q));
+    const matchProfileBand = (u.bands || []).some(b => (b.name || '').toLowerCase().includes(q));
+    return matchName || matchUsername || matchGroup || matchProfileBand;
+  });
+
   return (
     <div className="p-4 space-y-6">
       <div className="bg-red-50 border border-red-200 p-4 rounded-2xl flex items-start gap-3">
         <Shield className="text-red-500 shrink-0 mt-0.5" size={24} />
-        <div><h2 className="text-red-800 font-bold">管理者ダッシュボード</h2></div>
-      </div>
-      <div>
-        <h3 className="text-sm font-bold text-gray-800 mb-3 border-b pb-2">全ユーザー一覧 ({users.length})</h3>
-        <div className="space-y-2">
-          {users.map(u => (
-            <div key={u.id} className="bg-white p-3 rounded-xl shadow-sm border flex justify-between items-center">
-              <div>
-                <p className="font-bold text-sm text-gray-900">{u.displayName}</p>
-                <p className="text-[10px] text-gray-500">@{u.username} ・ {formatYearWithGrade(u.year)}</p>
-              </div>
-              {u.username !== 'Boss' && <button onClick={() => handleDelete('user', u.id)} className="text-red-500 p-2"><Trash2 size={16}/></button>}
-            </div>
-          ))}
+        <div>
+          <h2 className="text-red-800 font-bold">管理者ダッシュボード</h2>
+          <p className="text-xs text-red-600 mt-0.5">各アカウントのログインID・パスワード・所属バンドグループを一括管理できます</p>
         </div>
       </div>
+
+      {/* 検索フィルタ */}
+      <div>
+        <input
+          type="text"
+          placeholder="名前・ログインID・バンドグループ名で検索..."
+          className="w-full border border-gray-300 bg-white px-3.5 py-2.5 rounded-2xl text-xs focus:ring-2 focus:ring-indigo-500 shadow-sm"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+        />
+      </div>
+
+      <div>
+        <h3 className="text-sm font-bold text-gray-800 mb-3 border-b pb-2">
+          全ユーザー一覧 ({filteredUsers.length} / {users.length}人)
+        </h3>
+        <div className="space-y-3">
+          {filteredUsers.map(u => {
+            const joinedGroups = getUserJoinedGroups(u.id);
+            const profileBands = u.bands || [];
+
+            return (
+              <div key={u.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3">
+                <div className="flex justify-between items-start gap-2">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-bold text-base text-gray-900">{u.displayName}</p>
+                      <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                        {formatYearWithGrade(u.year)}
+                      </span>
+                    </div>
+                    {u.parts && u.parts.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {u.parts.map(part => (
+                          <span key={part} className="bg-gray-100 text-gray-600 text-[10px] px-1.5 py-0.5 rounded-md font-medium">
+                            {part}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {u.username !== 'Boss' && (
+                    <button
+                      onClick={() => handleDelete('user', u.id, u.displayName)}
+                      className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors shrink-0"
+                      title="ユーザーを削除"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+
+                {/* ログインID ＆ パスワード表示ボックス */}
+                <div className="grid grid-cols-2 gap-2 bg-gray-50 p-2.5 rounded-xl border border-gray-200 text-xs">
+                  <div>
+                    <span className="block text-[10px] text-gray-400 font-bold">ログインID</span>
+                    <span className="font-mono font-bold text-gray-800 break-all">@{u.username}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-gray-400 font-bold">パスワード</span>
+                    <span className="font-mono font-bold text-gray-800 break-all">{u.password || '未設定'}</span>
+                  </div>
+                </div>
+
+                {/* 参加しているバンドグループ一覧（グループ機能） */}
+                <div className="pt-1">
+                  <span className="block text-[10px] font-bold text-gray-500 mb-1.5">
+                    参加中のバンドグループ ({joinedGroups.length})
+                  </span>
+                  {joinedGroups.length === 0 ? (
+                    <p className="text-[11px] text-gray-400">参加しているグループはありません</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {joinedGroups.map(g => (
+                        <span
+                          key={g.id}
+                          className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 border border-indigo-200 px-2.5 py-1 rounded-lg text-[11px] font-bold"
+                        >
+                          <Users size={12} className="shrink-0 text-indigo-600" />
+                          <span>{g.name}</span>
+                          <span className="text-[9px] font-mono text-indigo-500 ml-0.5">({g.joinCode})</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* マイページで登録している所属バンド一覧 */}
+                {profileBands.length > 0 && (
+                  <div className="pt-2 border-t border-gray-100">
+                    <span className="block text-[10px] font-bold text-gray-400 mb-1.5">
+                      プロフィール登録バンド ({profileBands.length})
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {profileBands.map((band, bIdx) => (
+                        <div
+                          key={band.id || bIdx}
+                          className="inline-flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-0.5 text-[10px]"
+                        >
+                          <span className={`text-[9px] font-bold px-1 py-0.5 rounded border ${getBandCategoryBadgeStyle(band.category)}`}>
+                            {band.category}
+                          </span>
+                          <span className="font-bold text-gray-700">{band.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div>
         <h3 className="text-sm font-bold text-gray-800 mb-3 border-b pb-2 mt-6">全グループ一覧 ({groups.length})</h3>
-        <div className="space-y-2">
-          {groups.map(g => (
-            <div key={g.id} className="bg-white p-3 rounded-xl shadow-sm border flex justify-between items-center">
-              <div><p className="font-bold text-sm text-gray-900">{g.name}</p><p className="text-[10px] text-gray-500">コード: {g.joinCode}</p></div>
-              <button onClick={() => handleDelete('group', g.id)} className="text-red-500 p-2"><Trash2 size={16}/></button>
-            </div>
-          ))}
+        <div className="space-y-3">
+          {groups.map(g => {
+            const memberUsers = getGroupMemberUsers(g);
+            return (
+              <div key={g.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-2.5">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="font-bold text-sm text-gray-900">{g.name}</p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      参加コード: <strong className="font-mono text-gray-800">{g.joinCode}</strong> ・ メンバー {memberUsers.length}人
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleDelete('group', g.id, g.name)}
+                    className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors shrink-0"
+                    title="グループを削除"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+
+                {/* グループ所属メンバーの名前一覧 */}
+                <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                  <span className="block text-[10px] font-bold text-gray-400 mb-1">所属メンバー</span>
+                  {memberUsers.length === 0 ? (
+                    <p className="text-[11px] text-gray-400">メンバーがいません</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {memberUsers.map(m => (
+                        <span
+                          key={m.id}
+                          className="bg-white border border-gray-200 text-gray-800 text-[11px] font-bold px-2 py-0.5 rounded-lg"
+                        >
+                          {m.displayName} <span className="text-[9px] font-normal text-gray-400">(@{m.username})</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
