@@ -6,9 +6,10 @@ import {
 } from "firebase/firestore";
 import { 
   Calendar as CalendarIcon, Users, User, Settings, Check, 
-  X, ChevronLeft, ChevronRight, Shield, LogOut, Trash2, KeyRound, BookOpen, AlertTriangle, Edit2
+  X, ChevronLeft, ChevronRight, Shield, LogOut, Trash2, KeyRound, BookOpen, AlertTriangle, Edit2, Plus
 } from 'lucide-react';
 
+// --- Firebase Configuration ---
 const firebaseConfig = {
   apiKey: "AIzaSyCJewcEeVpF83wLDuYnFljlH2b9RxVf9iI",
   authDomain: "wpb2025-d1432.firebaseapp.com",
@@ -25,6 +26,24 @@ try {
 } catch (e) {
   console.warn("Firebase Error:", e);
 }
+
+// --- Shared Logic & Constants ---
+const BAND_CATEGORIES = ['通年バンド', '企画バンド', '復活バンド', '卒コンバンド', 'その他'];
+
+const getBandCategoryBadgeStyle = (category) => {
+  switch (category) {
+    case '通年バンド':
+      return 'bg-indigo-50 text-indigo-700 border-indigo-200';
+    case '企画バンド':
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    case '復活バンド':
+      return 'bg-amber-50 text-amber-700 border-amber-200';
+    case '卒コンバンド':
+      return 'bg-rose-50 text-rose-700 border-rose-200';
+    default:
+      return 'bg-gray-100 text-gray-700 border-gray-200';
+  }
+};
 
 const generateJoinCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
@@ -44,6 +63,7 @@ const getLocalYMD = (date) => {
   return `${y}-${m}-${d}`;
 };
 
+// --- Tutorial Component ---
 function TutorialModal({ onClose }) {
   const [step, setStep] = useState(1);
   const totalSteps = 6;
@@ -107,7 +127,7 @@ function TutorialModal({ onClose }) {
               <h3 className="text-lg font-bold text-gray-900">3. 「臨時OK」の裏ワザ</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
                 「普段は毎週火曜日NGにしているけど、<strong>来週の火曜は祝日だから特別に行ける！</strong>」<br/><br/>
-                そんな時は、モードを<strong className="text-blue-500">「〇 臨時OK」</strong>にして該当の日をタップしてください[cite: 2]。普段の「毎週×」の予定を崩さずに、その日だけ「行ける」に上書きできます。
+                そんな時は、モードを<strong className="text-blue-500">「〇 臨時OK」</strong>にして該当の日をタップしてください。普段の「毎週×」の予定を崩さずに、その日だけ「行ける」に上書きできます。
               </p>
             </div>
           )}
@@ -131,7 +151,7 @@ function TutorialModal({ onClose }) {
               </div>
               <h3 className="text-lg font-bold text-gray-900">5. 空き日が一目でわかる！</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                グループ画面の「空き日一覧」タブを見ると、メンバーの予定を自動で計算してリストアップします[cite: 2]。<br/><br/>
+                グループ画面の「空き日一覧」タブを見ると、メンバーの予定を自動で計算してリストアップします。<br/><br/>
                 <strong>◎ 全員参加</strong>の日や、<strong>△ 一部NG（誰がいないか）</strong>がひと目で分かるので、練習日決めが圧倒的にスムーズになります！
               </p>
             </div>
@@ -162,6 +182,7 @@ function TutorialModal({ onClose }) {
   );
 }
 
+// --- Main App Component ---
 export default function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('mySchedule');
@@ -215,13 +236,17 @@ export default function App() {
 
       try {
         const newUser = {
-          username: authForm.username, password: authForm.password,
-          displayName: authForm.displayName, year: authForm.year,
-          parts: authForm.parts, createdAt: new Date().toISOString()
+          username: authForm.username,
+          password: authForm.password,
+          displayName: authForm.displayName,
+          year: authForm.year,
+          parts: authForm.parts,
+          bands: [],
+          createdAt: new Date().toISOString()
         };
         const q = query(collection(db, "users"), where("username", "==", authForm.username));
         const querySnapshot = await getDocs(q);
-        if(!querySnapshot.empty) { setAuthError('このユーザー名は既に使用されています。'); return; }
+        if (!querySnapshot.empty) { setAuthError('このユーザー名は既に使用されています。'); return; }
         
         const docRef = await addDoc(collection(db, "users"), newUser);
         const loggedInUser = { id: docRef.id, ...newUser };
@@ -231,7 +256,6 @@ export default function App() {
         localStorage.setItem('wpb_bandsync_auth', JSON.stringify({ userData: loggedInUser, expiresAt }));
         
         setShowTutorial(true);
-
       } catch (err) { setAuthError('登録エラー: ' + err.message); }
     }
   };
@@ -350,6 +374,7 @@ export default function App() {
   );
 }
 
+// --- MyScheduleView ---
 function MyScheduleView({ user }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
@@ -386,7 +411,7 @@ function MyScheduleView({ user }) {
     
     const isValidRule = (r) => {
       if (r.startDate && r.startDate > dStr) return false;
-      if (r.endDate && r.endDate <= dStr) return false;
+      if (r.endDate && r.endDate < dStr) return false;
       return true;
     };
 
@@ -422,7 +447,7 @@ function MyScheduleView({ user }) {
     
     const isValidRule = (r) => {
       if (r.startDate && r.startDate > dStr) return false;
-      if (r.endDate && r.endDate <= dStr) return false;
+      if (r.endDate && r.endDate < dStr) return false;
       return true;
     };
 
@@ -452,11 +477,17 @@ function MyScheduleView({ user }) {
     return null;
   };
 
-  const toggleSchedule = async (date, period, type, newStatus, textVal = '', endDateVal = '') => {
+  const getPrevDayYMD = (ymdStr) => {
+    const [y, m, d] = ymdStr.split('-').map(Number);
+    const prev = new Date(y, m - 1, d - 1);
+    return getLocalYMD(prev);
+  };
+
+  const toggleSchedule = async (date, period, type, newStatus, textVal = '', startDateVal = '', endDateVal = '') => {
     if (isProcessing) return;
     setIsProcessing(true);
     
-    const dStr = getLocalYMD(date);
+    const dStr = startDateVal || getLocalYMD(date);
     const rulesOfSameType = mySchedules.filter(r => r.period === period && r.type === type);
     
     let activeRule = null;
@@ -466,7 +497,7 @@ function MyScheduleView({ user }) {
         const condition = type === 'weekly' ? (r => r.dayOfWeek === date.getDay()) :
                           type === 'monthly' ? (r => r.dayOfMonth === date.getDate()) :
                           (r => true);
-        const validRules = rulesOfSameType.filter(r => condition(r) && (!r.startDate || r.startDate <= dStr) && (!r.endDate || r.endDate > dStr));
+        const validRules = rulesOfSameType.filter(r => condition(r) && (!r.startDate || r.startDate <= dStr) && (!r.endDate || r.endDate >= dStr));
         if (validRules.length > 0) {
             validRules.sort((a, b) => {
               const sa = a.startDate || '1970-01-01';
@@ -487,31 +518,36 @@ function MyScheduleView({ user }) {
         const safeStartDate = activeRule.startDate || '2000-01-01';
         
         if ((currentStatus === newStatus && currentText === textVal && currentEndDate === endDateVal) || (!activeRule.status && newStatus === 'x' && !textVal && !endDateVal)) {
-            if (type === 'once' || safeStartDate === dStr) {
+            if (type === 'once' || safeStartDate >= dStr) {
                 setMySchedules(newSchedules.filter(r => r.id !== activeRule.id));
                 await deleteDoc(doc(db, "schedules", activeRule.id));
             } else {
-                await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
+                const prevDayStr = getPrevDayYMD(dStr);
+                await updateDoc(doc(db, "schedules", activeRule.id), { endDate: prevDayStr });
                 const idx = newSchedules.findIndex(r => r.id === activeRule.id);
-                if(idx >= 0) newSchedules[idx] = { ...newSchedules[idx], endDate: dStr };
+                if (idx >= 0) newSchedules[idx] = { ...newSchedules[idx], endDate: prevDayStr };
                 setMySchedules(newSchedules);
             }
         } else {
-            if (type === 'once' || safeStartDate === dStr) {
+            if (type === 'once' || safeStartDate >= dStr) {
                 const updatePayload = { status: newStatus, text: textVal };
-                if (type !== 'once') updatePayload.endDate = endDateVal;
+                if (type !== 'once') {
+                  updatePayload.startDate = dStr;
+                  updatePayload.endDate = endDateVal;
+                }
                 await updateDoc(doc(db, "schedules", activeRule.id), updatePayload);
                 const idx = newSchedules.findIndex(r => r.id === activeRule.id);
-                if(idx >= 0) newSchedules[idx] = { ...newSchedules[idx], ...updatePayload };
+                if (idx >= 0) newSchedules[idx] = { ...newSchedules[idx], ...updatePayload };
                 setMySchedules(newSchedules);
             } else {
-                await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
+                const prevDayStr = getPrevDayYMD(dStr);
+                await updateDoc(doc(db, "schedules", activeRule.id), { endDate: prevDayStr });
                 let newRule = { userId: user.id, period, type, status: newStatus, text: textVal, startDate: dStr, endDate: endDateVal };
                 if (type === 'weekly') newRule.dayOfWeek = date.getDay();
                 if (type === 'monthly') newRule.dayOfMonth = date.getDate();
                 
                 const docRef = await addDoc(collection(db, "schedules"), newRule);
-                newSchedules = newSchedules.map(r => r.id === activeRule.id ? { ...r, endDate: dStr } : r);
+                newSchedules = newSchedules.map(r => r.id === activeRule.id ? { ...r, endDate: prevDayStr } : r);
                 newSchedules.push({ id: docRef.id, ...newRule });
                 setMySchedules(newSchedules);
             }
@@ -541,12 +577,12 @@ function MyScheduleView({ user }) {
     }
   };
 
-  const handleSetAllDay = async (type, endDateVal = '') => {
+  const handleSetAllDay = async (type, startDateVal = '', endDateVal = '') => {
     if (isProcessing) return;
     setIsProcessing(true);
 
     const periods = getPeriodListForDate(selectedDate);
-    const dStr = getLocalYMD(selectedDate);
+    const dStr = startDateVal || getLocalYMD(selectedDate);
     let updatedSchedules = [...mySchedules];
     let hasError = false;
     let errorMessage = "";
@@ -559,7 +595,7 @@ function MyScheduleView({ user }) {
             const condition = targetType === 'weekly' ? (r => r.dayOfWeek === selectedDate.getDay()) :
                               targetType === 'monthly' ? (r => r.dayOfMonth === selectedDate.getDate()) :
                               (r => true);
-            const validRules = rulesOfSameType.filter(r => condition(r) && (!r.startDate || r.startDate <= dStr) && (!r.endDate || r.endDate > dStr));
+            const validRules = rulesOfSameType.filter(r => condition(r) && (!r.startDate || r.startDate <= dStr) && (!r.endDate || r.endDate >= dStr));
             if (validRules.length > 0) {
                 validRules.sort((a, b) => {
                   const sa = a.startDate || '1970-01-01';
@@ -584,30 +620,35 @@ function MyScheduleView({ user }) {
         if (isAllSet) {
           if (activeRule) {
              const safeStartDate = activeRule.startDate || '2000-01-01';
-             if (type === 'once' || safeStartDate === dStr) {
+             if (type === 'once' || safeStartDate >= dStr) {
                 await deleteDoc(doc(db, "schedules", activeRule.id));
                 updatedSchedules = updatedSchedules.filter(r => r.id !== activeRule.id);
              } else {
-                await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
+                const prevDayStr = getPrevDayYMD(dStr);
+                await updateDoc(doc(db, "schedules", activeRule.id), { endDate: prevDayStr });
                 const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
-                if(idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], endDate: dStr };
+                if (idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], endDate: prevDayStr };
              }
           }
         } else {
           if (activeRule) {
              const currentStatus = activeRule.status || 'x';
              const safeStartDate = activeRule.startDate || '2000-01-01';
-             if (currentStatus !== inputStatus) {
-                 if (type === 'once' || safeStartDate === dStr) {
+             if (currentStatus !== inputStatus || activeRule.endDate !== endDateVal) {
+                 if (type === 'once' || safeStartDate >= dStr) {
                      const updatePayload = { status: inputStatus, text: '' };
-                     if (type !== 'once') updatePayload.endDate = endDateVal;
+                     if (type !== 'once') {
+                       updatePayload.startDate = dStr;
+                       updatePayload.endDate = endDateVal;
+                     }
                      await updateDoc(doc(db, "schedules", activeRule.id), updatePayload);
                      const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
-                     if(idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], ...updatePayload };
+                     if (idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], ...updatePayload };
                  } else {
-                     await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
+                     const prevDayStr = getPrevDayYMD(dStr);
+                     await updateDoc(doc(db, "schedules", activeRule.id), { endDate: prevDayStr });
                      const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
-                     if(idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], endDate: dStr };
+                     if (idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], endDate: prevDayStr };
                      
                      let newRule = { userId: user.id, period, type, status: inputStatus, text: '', startDate: dStr, endDate: endDateVal };
                      if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
@@ -662,23 +703,28 @@ function MyScheduleView({ user }) {
   };
 
   const requestToggleSchedule = (date, period, type, newStatus, textVal = '') => {
+    const defaultStart = getLocalYMD(date);
     if (type === 'once') {
-      toggleSchedule(date, period, type, newStatus, textVal, '');
+      toggleSchedule(date, period, type, newStatus, textVal, defaultStart, '');
     } else {
+      const existingRule = getScheduleRule(date, period);
+      const isAlreadySameType = existingRule && existingRule.type === type && !existingRule.isOverride;
       setConfirmDialog({
         type: 'periodInput',
-        title: '繰り返し期間の指定',
+        title: isAlreadySameType ? '繰り返し予定の変更・解除' : '繰り返し期間の指定',
         scheduleType: type,
         period: period,
         newStatus: newStatus,
         textVal: textVal,
         date: date,
-        endDate: ''
+        startDate: defaultStart,
+        endDate: isAlreadySameType && existingRule.endDate ? existingRule.endDate : ''
       });
     }
   };
 
   const requestSetAllDay = (type) => {
+    const defaultStart = getLocalYMD(selectedDate);
     if (type === 'once') {
       setConfirmDialog({
         title: '1日一括設定の確認',
@@ -686,7 +732,7 @@ function MyScheduleView({ user }) {
         subMessage: '※この日のすべての時限が変更されます。',
         onConfirm: () => {
           setConfirmDialog(null);
-          handleSetAllDay(type, '');
+          handleSetAllDay(type, defaultStart, '');
         }
       });
     } else {
@@ -694,6 +740,7 @@ function MyScheduleView({ user }) {
         type: 'periodInputAllDay',
         title: '1日一括（期間指定）の確認',
         scheduleType: type,
+        startDate: defaultStart,
         endDate: ''
       });
     }
@@ -930,20 +977,32 @@ function MyScheduleView({ user }) {
               <div className="space-y-4">
                 <p className="text-xs text-gray-700 leading-relaxed font-medium">
                   {confirmDialog.type === 'periodInput'
-                    ? `「${getTypeLabel(confirmDialog.scheduleType, confirmDialog.date)}」の【${formatPeriod(confirmDialog.period)}】に「${getStatusLabel(confirmDialog.newStatus)}」を設定します。`
-                    : `「${getTypeLabel(confirmDialog.scheduleType, selectedDate)}」の【すべての時限（全日）】に「${getStatusLabel(inputStatus)}」を一括設定します。`}
+                    ? `「${getTypeLabel(confirmDialog.scheduleType, confirmDialog.date)}」の【${formatPeriod(confirmDialog.period)}】に「${getStatusLabel(confirmDialog.newStatus)}」を設定（または解除）します。`
+                    : `「${getTypeLabel(confirmDialog.scheduleType, selectedDate)}」の【すべての時限（全日）】に「${getStatusLabel(inputStatus)}」を一括設定（または解除）します。`}
                 </p>
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-700 mb-1">終了日（この日まで適用・空欄なら無期限）</label>
-                  <input 
-                    type="date" 
-                    className="w-full border border-gray-300 p-2.5 rounded-xl text-xs font-bold text-gray-800"
-                    value={confirmDialog.endDate}
-                    onChange={(e) => setConfirmDialog({ ...confirmDialog, endDate: e.target.value })}
-                  />
-                  <p className="text-[10px] text-gray-400 mt-1">※指定した終了日を迎えると、この繰り返し予定は自動で終了します。</p>
+                <div className="space-y-3 bg-gray-50 p-3 rounded-2xl border border-gray-200">
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">開始日（この日から適用）</label>
+                    <input 
+                      type="date" 
+                      className="w-full border border-gray-300 bg-white p-2 rounded-xl text-xs font-bold text-gray-800"
+                      value={confirmDialog.startDate}
+                      onChange={(e) => setConfirmDialog({ ...confirmDialog, startDate: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">終了日（この日まで適用・空欄なら無期限）</label>
+                    <input 
+                      type="date" 
+                      className="w-full border border-gray-300 bg-white p-2 rounded-xl text-xs font-bold text-gray-800"
+                      value={confirmDialog.endDate}
+                      min={confirmDialog.startDate}
+                      onChange={(e) => setConfirmDialog({ ...confirmDialog, endDate: e.target.value })}
+                    />
+                  </div>
+                  <p className="text-[10px] text-gray-500">※すでに同じ予定が登録されている場合は、そのまま「決定して実行」を押すと予定を解除できます。</p>
                 </div>
-                <div className="flex gap-2 pt-2">
+                <div className="flex gap-2 pt-1">
                   <button
                     onClick={() => setConfirmDialog(null)}
                     className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-200 transition-colors"
@@ -952,17 +1011,23 @@ function MyScheduleView({ user }) {
                   </button>
                   <button
                     onClick={() => {
+                      const startVal = confirmDialog.startDate;
                       const endVal = confirmDialog.endDate;
+                      if (startVal && endVal && startVal > endVal) {
+                        alert('終了日は開始日以降の日付を指定してください。');
+                        return;
+                      }
                       const sType = confirmDialog.scheduleType;
                       const per = confirmDialog.period;
                       const st = confirmDialog.newStatus;
                       const txt = confirmDialog.textVal;
+                      const targetDate = confirmDialog.date;
                       setConfirmDialog(null);
 
                       if (confirmDialog.type === 'periodInput') {
-                        toggleSchedule(confirmDialog.date, per, sType, st, txt, endVal);
+                        toggleSchedule(targetDate, per, sType, st, txt, startVal, endVal);
                       } else {
-                        handleSetAllDay(sType, endVal);
+                        handleSetAllDay(sType, startVal, endVal);
                       }
                     }}
                     className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-indigo-700 transition-colors"
@@ -972,7 +1037,7 @@ function MyScheduleView({ user }) {
                 </div>
               </div>
             ) : (
-              <>
+              <div>
                 <p className="text-xs text-gray-700 leading-relaxed font-medium mb-2">
                   {confirmDialog.message}
                 </p>
@@ -995,7 +1060,7 @@ function MyScheduleView({ user }) {
                     実行する
                   </button>
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -1004,6 +1069,7 @@ function MyScheduleView({ user }) {
   );
 }
 
+// --- GroupsView ---
 function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [groups, setGroups] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
@@ -1044,7 +1110,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       };
       fetchDetails();
     }
-  }, [activeGroup]);
+  }, [activeGroup, user]);
 
   const handleCreateGroup = async () => {
     if (!newGroupName) return;
@@ -1095,7 +1161,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     
     const isValidRule = (r) => {
       if (r.startDate && r.startDate > dStr) return false;
-      if (r.endDate && r.endDate <= dStr) return false;
+      if (r.endDate && r.endDate < dStr) return false;
       return true;
     };
 
@@ -1126,7 +1192,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   };
 
   const getDayStatus = (date) => {
-    if(groupMembers.length === 0) return { dayStatus: 'ng', detail: [] };
+    if (groupMembers.length === 0) return { dayStatus: 'ng', detail: [] };
     const periods = getPeriodListForDate(date);
     const detail = [];
     let isAnyPeriodAllOK = false;
@@ -1286,7 +1352,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
       if (actualMembersCount === 0) return <div className="p-8 text-center text-gray-500">メンバーがいません。</div>;
 
-      for(let i=0; i<60; i++) {
+      for (let i = 0; i < 60; i++) {
         const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
         const periods = getPeriodListForDate(d);
         const dayPeriods = [];
@@ -1520,8 +1586,8 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             <span className="font-bold text-gray-800">メンバー一覧 ({pureMembers.length}人)</span>
           </div>
           {pureMembers.map(m => (
-            <div key={m.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4">
-              <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl shadow-inner shrink-0">
+            <div key={m.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-start gap-4">
+              <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl shadow-inner shrink-0 mt-0.5">
                 {m.displayName.substring(0, 1)}
               </div>
               <div className="flex-1 min-w-0">
@@ -1529,12 +1595,36 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                   <h4 className="font-bold text-gray-900 truncate">{m.displayName}</h4>
                   <span className="text-[10px] text-gray-400">@{m.username}</span>
                 </div>
-                <div className="text-xs text-gray-500 mt-1">{m.year}</div>
-                <div className="flex flex-wrap gap-1 mt-1.5">
+                <div className="text-xs text-gray-500 mt-0.5">{m.year}</div>
+                
+                {/* 担当パート */}
+                <div className="flex flex-wrap gap-1 mt-2">
                   {m.parts && m.parts.map(part => (
                     <span key={part} className="bg-gray-100 text-gray-600 text-[10px] px-1.5 py-0.5 rounded-md font-medium">{part}</span>
                   ))}
                   {(!m.parts || m.parts.length === 0) && <span className="text-[10px] text-gray-400">パート未設定</span>}
+                </div>
+
+                {/* 所属バンド一覧 */}
+                <div className="mt-2.5 pt-2 border-t border-gray-100">
+                  <p className="text-[10px] font-bold text-gray-400 mb-1.5">所属バンド</p>
+                  {m.bands && m.bands.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {m.bands.map((band, bIdx) => (
+                        <div 
+                          key={band.id || bIdx} 
+                          className="inline-flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-[11px]"
+                        >
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${getBandCategoryBadgeStyle(band.category)}`}>
+                            {band.category}
+                          </span>
+                          <span className="font-bold text-gray-800">{band.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-gray-400">未登録</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -1643,10 +1733,30 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   );
 }
 
+// --- ProfileView ---
 function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [newDisplayName, setNewDisplayName] = useState(user.displayName);
   const [nameError, setNameError] = useState('');
+
+  // 所属バンド追加用のステート
+  const [selectedBandCategory, setSelectedBandCategory] = useState(BAND_CATEGORIES[0]);
+  const [newBandName, setNewBandName] = useState('');
+  const [bandError, setBandError] = useState('');
+  const [isUpdatingBands, setIsUpdatingBands] = useState(false);
+
+  const saveUserToLocalStorage = (updatedUser) => {
+    const storedAuth = localStorage.getItem('wpb_bandsync_auth');
+    if (storedAuth) {
+      try {
+        const parsed = JSON.parse(storedAuth);
+        parsed.userData = updatedUser;
+        localStorage.setItem('wpb_bandsync_auth', JSON.stringify(parsed));
+      } catch (e) {
+        console.warn("Storage update error", e);
+      }
+    }
+  };
 
   const handleUpdateDisplayName = async () => {
     if (!newDisplayName.trim()) {
@@ -1657,20 +1767,64 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
       await updateDoc(doc(db, "users", user.id), { displayName: newDisplayName.trim() });
       const updatedUser = { ...user, displayName: newDisplayName.trim() };
       setUser(updatedUser);
-      
-      const storedAuth = localStorage.getItem('wpb_bandsync_auth');
-      if (storedAuth) {
-        const parsed = JSON.parse(storedAuth);
-        parsed.userData = updatedUser;
-        localStorage.setItem('wpb_bandsync_auth', JSON.stringify(parsed));
-      }
-
+      saveUserToLocalStorage(updatedUser);
       setIsEditingName(false);
       setNameError('');
     } catch (e) {
       setNameError('更新に失敗しました: ' + e.message);
     }
   };
+
+  const handleAddBand = async (e) => {
+    e.preventDefault();
+    setBandError('');
+    if (!newBandName.trim()) {
+      setBandError('バンド名を入力してください');
+      return;
+    }
+    if (isUpdatingBands) return;
+    setIsUpdatingBands(true);
+
+    try {
+      const currentBands = user.bands || [];
+      const newBandItem = {
+        id: 'band_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        category: selectedBandCategory,
+        name: newBandName.trim()
+      };
+      const updatedBands = [...currentBands, newBandItem];
+
+      await updateDoc(doc(db, "users", user.id), { bands: updatedBands });
+      const updatedUser = { ...user, bands: updatedBands };
+      setUser(updatedUser);
+      saveUserToLocalStorage(updatedUser);
+      setNewBandName('');
+    } catch (err) {
+      setBandError('バンドの追加に失敗しました: ' + err.message);
+    } finally {
+      setIsUpdatingBands(false);
+    }
+  };
+
+  const handleDeleteBand = async (bandId) => {
+    if (isUpdatingBands) return;
+    setIsUpdatingBands(true);
+    try {
+      const currentBands = user.bands || [];
+      const updatedBands = currentBands.filter(b => b.id !== bandId);
+
+      await updateDoc(doc(db, "users", user.id), { bands: updatedBands });
+      const updatedUser = { ...user, bands: updatedBands };
+      setUser(updatedUser);
+      saveUserToLocalStorage(updatedUser);
+    } catch (err) {
+      alert('削除に失敗しました: ' + err.message);
+    } finally {
+      setIsUpdatingBands(false);
+    }
+  };
+
+  const userBands = user.bands || [];
 
   return (
     <div className="p-4 space-y-4">
@@ -1709,8 +1863,96 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
         <p className="text-sm text-gray-500">@{user.username}</p>
         <div className="mt-6 flex justify-center gap-2 flex-wrap">
           <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs font-medium border border-gray-200">{user.year}</span>
-          {user.parts.map(part => <span key={part} className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold border border-indigo-100">{part}</span>)}
+          {user.parts && user.parts.map(part => <span key={part} className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold border border-indigo-100">{part}</span>)}
         </div>
+      </div>
+
+      {/* 所属バンド管理セクション */}
+      <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 space-y-4">
+        <div className="flex items-center justify-between border-b border-gray-100 pb-2.5">
+          <div className="flex items-center gap-2">
+            <Users size={18} className="text-indigo-600" />
+            <h3 className="font-bold text-gray-800 text-sm">所属バンド ({userBands.length})</h3>
+          </div>
+          <span className="text-[10px] text-gray-400">グループメンバーに公開されます</span>
+        </div>
+
+        {/* 登録済みバンド一覧 */}
+        {userBands.length === 0 ? (
+          <div className="text-center py-4 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+            <p className="text-xs text-gray-400">所属しているバンドがまだ登録されていません</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {userBands.map((band) => (
+              <div 
+                key={band.id} 
+                className="flex items-center justify-between p-2.5 bg-gray-50 rounded-2xl border border-gray-100"
+              >
+                <div className="flex items-center gap-2 min-w-0 pr-2">
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border shrink-0 ${getBandCategoryBadgeStyle(band.category)}`}>
+                    {band.category}
+                  </span>
+                  <span className="text-sm font-bold text-gray-800 truncate">{band.name}</span>
+                </div>
+                <button
+                  onClick={() => handleDeleteBand(band.id)}
+                  disabled={isUpdatingBands}
+                  className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors shrink-0"
+                  title="削除"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 新規バンド追加フォーム */}
+        <form onSubmit={handleAddBand} className="pt-3 border-t border-gray-100 space-y-3">
+          <label className="block text-xs font-bold text-gray-700">新しい所属バンドを追加</label>
+          {bandError && <p className="text-xs text-red-500">{bandError}</p>}
+          
+          <div>
+            <span className="block text-[10px] font-medium text-gray-500 mb-1.5">1. バンド種別を選択</span>
+            <div className="grid grid-cols-3 gap-1.5">
+              {BAND_CATEGORIES.map(cat => (
+                <button
+                  type="button"
+                  key={cat}
+                  onClick={() => setSelectedBandCategory(cat)}
+                  className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border transition-all ${
+                    selectedBandCategory === cat
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <span className="block text-[10px] font-medium text-gray-500 mb-1.5">2. バンド名を入力して追加</span>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder={`${selectedBandCategory}の名前を入力`}
+                className="flex-1 border border-gray-300 px-3 py-2 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500"
+                value={newBandName}
+                onChange={e => setNewBandName(e.target.value)}
+              />
+              <button
+                type="submit"
+                disabled={isUpdatingBands}
+                className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-xs hover:bg-indigo-700 transition-colors flex items-center gap-1 shrink-0 disabled:opacity-50"
+              >
+                <Plus size={14} /> 追加
+              </button>
+            </div>
+          </div>
+        </form>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mt-6">
@@ -1742,6 +1984,7 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
   );
 }
 
+// --- AdminView ---
 function AdminView() {
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
