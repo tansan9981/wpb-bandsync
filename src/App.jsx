@@ -1,3 +1,4 @@
+``jsx
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from "firebase/app";
 import { 
@@ -19,6 +20,7 @@ const firebaseConfig = {
   appId: "1:834123232552:web:4acd559725a5892aa6cc1d"
 };
 
+// Initialize Firebase
 let db;
 try {
   const app = initializeApp(firebaseConfig);
@@ -27,6 +29,7 @@ try {
   console.warn("Firebase Error:", e);
 }
 
+// --- Shared Logic ---
 const generateJoinCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
 const getPeriodListForDate = (date) => {
@@ -45,6 +48,7 @@ const getLocalYMD = (date) => {
   return `${y}-${m}-${d}`;
 };
 
+// --- Tutorial Component ---
 function TutorialModal({ onClose }) {
   const [step, setStep] = useState(1);
   const totalSteps = 6;
@@ -92,10 +96,10 @@ function TutorialModal({ onClose }) {
                 <div className="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-bold">毎週</div>
                 <div className="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-bold">全日一括</div>
               </div>
-              <h3 className="text-lg font-bold text-gray-900">2. 繰り返しと一括設定</h3>
+              <h3 className="text-lg font-bold text-gray-900">2. 繰り返しと期間設定</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                「この日」だけでなく、<strong>「毎週」「毎月」</strong>のボタンを押せば、先の予定まで一気に登録できます。<br/><br/>
-                また、<strong>「この日を一括で設定（全日）」</strong>のボタンを使えば、1日丸ごとの予定をまとめて入力・解除できてとても便利です！
+                「毎週」「毎月」などの繰り返しは、<strong>「開始日〜終了日」の期間を指定して</strong>登録できるようになりました。<br/><br/>
+                また、<strong>「この日を一括で設定（全日）」</strong>のボタンを使えば、1日丸ごとの予定をまとめて入力・解除できます！
               </p>
             </div>
           )}
@@ -318,8 +322,9 @@ export default function App() {
           </form>
         </div>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
@@ -351,6 +356,7 @@ export default function App() {
   );
 }
 
+// --- MyScheduleView ---
 function MyScheduleView({ user }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
@@ -453,7 +459,7 @@ function MyScheduleView({ user }) {
     return null;
   };
 
-  const toggleSchedule = async (date, period, type, newStatus, textVal = '') => {
+  const toggleSchedule = async (date, period, type, newStatus, textVal = '', endDateVal = '') => {
     if (isProcessing) return;
     setIsProcessing(true);
     
@@ -484,9 +490,10 @@ function MyScheduleView({ user }) {
       if (activeRule) {
         const currentStatus = activeRule.status || 'x';
         const currentText = activeRule.text || '';
+        const currentEndDate = activeRule.endDate || '';
         const safeStartDate = activeRule.startDate || '2000-01-01';
         
-        if ((currentStatus === newStatus && currentText === textVal) || (!activeRule.status && newStatus === 'x' && !textVal)) {
+        if ((currentStatus === newStatus && currentText === textVal && currentEndDate === endDateVal) || (!activeRule.status && newStatus === 'x' && !textVal && !endDateVal)) {
             if (type === 'once' || safeStartDate === dStr) {
                 setMySchedules(newSchedules.filter(r => r.id !== activeRule.id));
                 await deleteDoc(doc(db, "schedules", activeRule.id));
@@ -498,13 +505,15 @@ function MyScheduleView({ user }) {
             }
         } else {
             if (type === 'once' || safeStartDate === dStr) {
-                await updateDoc(doc(db, "schedules", activeRule.id), { status: newStatus, text: textVal });
+                const updatePayload = { status: newStatus, text: textVal };
+                if (type !== 'once') updatePayload.endDate = endDateVal;
+                await updateDoc(doc(db, "schedules", activeRule.id), updatePayload);
                 const idx = newSchedules.findIndex(r => r.id === activeRule.id);
-                if(idx >= 0) newSchedules[idx] = { ...newSchedules[idx], status: newStatus, text: textVal };
+                if(idx >= 0) newSchedules[idx] = { ...newSchedules[idx], ...updatePayload };
                 setMySchedules(newSchedules);
             } else {
                 await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
-                let newRule = { userId: user.id, period, type, status: newStatus, text: textVal, startDate: dStr };
+                let newRule = { userId: user.id, period, type, status: newStatus, text: textVal, startDate: dStr, endDate: endDateVal };
                 if (type === 'weekly') newRule.dayOfWeek = date.getDay();
                 if (type === 'monthly') newRule.dayOfMonth = date.getDate();
                 
@@ -515,7 +524,7 @@ function MyScheduleView({ user }) {
             }
         }
       } else {
-        let newRule = { userId: user.id, period, type, status: newStatus, text: textVal, startDate: dStr };
+        let newRule = { userId: user.id, period, type, status: newStatus, text: textVal, startDate: dStr, endDate: endDateVal };
         if (type === 'once') newRule.date = dStr;
         if (type === 'weekly') newRule.dayOfWeek = date.getDay();
         if (type === 'monthly') newRule.dayOfMonth = date.getDate();
@@ -539,7 +548,7 @@ function MyScheduleView({ user }) {
     }
   };
 
-  const handleSetAllDay = async (type) => {
+  const handleSetAllDay = async (type, endDateVal = '') => {
     if (isProcessing) return;
     setIsProcessing(true);
 
@@ -597,15 +606,17 @@ function MyScheduleView({ user }) {
              const safeStartDate = activeRule.startDate || '2000-01-01';
              if (currentStatus !== inputStatus) {
                  if (type === 'once' || safeStartDate === dStr) {
-                     await updateDoc(doc(db, "schedules", activeRule.id), { status: inputStatus, text: '' });
+                     const updatePayload = { status: inputStatus, text: '' };
+                     if (type !== 'once') updatePayload.endDate = endDateVal;
+                     await updateDoc(doc(db, "schedules", activeRule.id), updatePayload);
                      const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
-                     if(idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], status: inputStatus, text: '' };
+                     if(idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], ...updatePayload };
                  } else {
                      await updateDoc(doc(db, "schedules", activeRule.id), { endDate: dStr });
                      const idx = updatedSchedules.findIndex(r => r.id === activeRule.id);
                      if(idx >= 0) updatedSchedules[idx] = { ...updatedSchedules[idx], endDate: dStr };
                      
-                     let newRule = { userId: user.id, period, type, status: inputStatus, text: '', startDate: dStr };
+                     let newRule = { userId: user.id, period, type, status: inputStatus, text: '', startDate: dStr, endDate: endDateVal };
                      if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
                      if (type === 'monthly') newRule.dayOfMonth = selectedDate.getDate();
                      
@@ -614,7 +625,7 @@ function MyScheduleView({ user }) {
                  }
              }
           } else {
-             let newRule = { userId: user.id, period, type, status: inputStatus, text: '', startDate: dStr };
+             let newRule = { userId: user.id, period, type, status: inputStatus, text: '', startDate: dStr, endDate: endDateVal };
              if (type === 'once') newRule.date = dStr;
              if (type === 'weekly') newRule.dayOfWeek = selectedDate.getDay();
              if (type === 'monthly') newRule.dayOfMonth = selectedDate.getDate();
@@ -659,30 +670,41 @@ function MyScheduleView({ user }) {
 
   const requestToggleSchedule = (date, period, type, newStatus, textVal = '') => {
     if (type === 'once') {
-      toggleSchedule(date, period, type, newStatus, textVal);
+      toggleSchedule(date, period, type, newStatus, textVal, '');
     } else {
+      // 繰り返しの場合、終了日を設定できるモーダルを開く
       setConfirmDialog({
-        title: '繰り返し予定の確認',
-        message: `「${getTypeLabel(type, date)}」の【${formatPeriod(period)}】に「${getStatusLabel(newStatus)}」を設定（または変更・解除）しますか？`,
-        subMessage: '※この日以降の将来の予定に反映されます。',
-        onConfirm: () => {
-          setConfirmDialog(null);
-          toggleSchedule(date, period, type, newStatus, textVal);
-        }
+        type: 'periodInput',
+        title: '繰り返し期間の指定',
+        scheduleType: type,
+        period: period,
+        newStatus: newStatus,
+        textVal: textVal,
+        date: date,
+        endDate: '' // 初期値は無期限（空）
       });
     }
   };
 
   const requestSetAllDay = (type) => {
-    setConfirmDialog({
-      title: '1日一括設定の確認',
-      message: `「${getTypeLabel(type, selectedDate)}」の【すべての時限（全日）】に「${getStatusLabel(inputStatus)}」を一括で設定（または解除）しますか？`,
-      subMessage: type !== 'once' ? '※この日以降の将来の予定にも一括で反映されます。' : '※この日のすべての時限が変更されます。',
-      onConfirm: () => {
-        setConfirmDialog(null);
-        handleSetAllDay(type);
-      }
-    });
+    if (type === 'once') {
+      setConfirmDialog({
+        title: '1日一括設定の確認',
+        message: `「${getTypeLabel(type, selectedDate)}」の【すべての時限（全日）】に「${getStatusLabel(inputStatus)}」を一括で設定（または解除）しますか？`,
+        subMessage: '※この日のすべての時限が変更されます。',
+        onConfirm: () => {
+          setConfirmDialog(null);
+          handleSetAllDay(type, '');
+        }
+      });
+    } else {
+      setConfirmDialog({
+        type: 'periodInputAllDay',
+        title: '1日一括（期間指定）の確認',
+        scheduleType: type,
+        endDate: ''
+      });
+    }
   };
 
   const renderCalendar = () => {
@@ -904,35 +926,86 @@ function MyScheduleView({ user }) {
       {renderCalendar()}
       {renderDayDetail()}
 
+      {/* 確認・期間設定ダイアログモーダル */}
       {confirmDialog && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 duration-150">
             <div className="flex items-center gap-2 text-indigo-600 mb-3">
               <AlertTriangle size={22} className="shrink-0" />
               <h4 className="font-bold text-base text-gray-900">{confirmDialog.title}</h4>
             </div>
-            <p className="text-xs text-gray-700 leading-relaxed font-medium mb-2">
-              {confirmDialog.message}
-            </p>
-            {confirmDialog.subMessage && (
-              <p className="text-[11px] text-gray-500 bg-gray-50 p-2.5 rounded-xl mb-5">
-                {confirmDialog.subMessage}
-              </p>
+
+            {confirmDialog.type === 'periodInput' || confirmDialog.type === 'periodInputAllDay' ? (
+              <div className="space-y-4">
+                <p className="text-xs text-gray-700 leading-relaxed font-medium">
+                  {confirmDialog.type === 'periodInput'
+                    ? `「${getTypeLabel(confirmDialog.scheduleType, confirmDialog.date)}」の【${formatPeriod(confirmDialog.period)}】に「${getStatusLabel(confirmDialog.newStatus)}」を設定します。`
+                    : `「${getTypeLabel(confirmDialog.scheduleType, selectedDate)}」の【すべての時限（全日）】に「${getStatusLabel(inputStatus)}」を一括設定します。`}
+                </p>
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 mb-1">終了日（この日まで適用・空欄なら無期限）</label>
+                  <input 
+                    type="date" 
+                    className="w-full border border-gray-300 p-2.5 rounded-xl text-xs font-bold text-gray-800"
+                    value={confirmDialog.endDate}
+                    onChange={(e) => setConfirmDialog({ ...confirmDialog, endDate: e.target.value })}
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">※指定した終了日を迎えると、この繰り返し予定は自動で終了します。</p>
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={() => setConfirmDialog(null)}
+                    className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-200 transition-colors"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    onClick={() => {
+                      const endVal = confirmDialog.endDate;
+                      const sType = confirmDialog.scheduleType;
+                      const per = confirmDialog.period;
+                      const st = confirmDialog.newStatus;
+                      const txt = confirmDialog.textVal;
+                      setConfirmDialog(null);
+
+                      if (confirmDialog.type === 'periodInput') {
+                        toggleSchedule(confirmDialog.date, per, sType, st, txt, endVal);
+                      } else {
+                        handleSetAllDay(sType, endVal);
+                      }
+                    }}
+                    className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-indigo-700 transition-colors"
+                  >
+                    決定して実行
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-gray-700 leading-relaxed font-medium mb-2">
+                  {confirmDialog.message}
+                </p>
+                {confirmDialog.subMessage && (
+                  <p className="text-[11px] text-gray-500 bg-gray-50 p-2.5 rounded-xl mb-5">
+                    {confirmDialog.subMessage}
+                  </p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfirmDialog(null)}
+                    className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-200 transition-colors"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    onClick={confirmDialog.onConfirm}
+                    className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-indigo-700 transition-colors"
+                  >
+                    実行する
+                  </button>
+                </div>
+              </>
             )}
-            <div className="flex gap-2">
-              <button
-                onClick={() => setConfirmDialog(null)}
-                className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-200 transition-colors"
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={confirmDialog.onConfirm}
-                className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-indigo-700 transition-colors"
-              >
-                実行する
-              </button>
-            </div>
           </div>
         </div>
       )}
@@ -1029,14 +1102,15 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     const rules = allSchedules.filter(r => r.userId === userId && r.period === period);
     const dStr = getLocalYMD(date);
     
-    const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
-    if (onceRule) return { ...onceRule, status: onceRule.status || 'x', text: onceRule.text || '' };
-    
+    // 期間（開始日・終了日）のチェック関数
     const isValidRule = (r) => {
       if (r.startDate && r.startDate > dStr) return false;
       if (r.endDate && r.endDate <= dStr) return false;
       return true;
     };
+
+    const onceRule = rules.find(r => r.type === 'once' && r.date === dStr);
+    if (onceRule) return { ...onceRule, status: onceRule.status || 'x', text: onceRule.text || '' };
 
     const findValidRule = (type, condition) => {
        const validRules = rules.filter(r => r.type === type && condition(r) && isValidRule(r));
@@ -1736,3 +1810,4 @@ function AdminView() {
     </div>
   );
 }
+```
