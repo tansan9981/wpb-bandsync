@@ -9,7 +9,6 @@ import {
   X, ChevronLeft, ChevronRight, Shield, LogOut, Trash2, KeyRound, BookOpen, AlertTriangle, Edit2
 } from 'lucide-react';
 
-// --- Firebase Configuration ---
 const firebaseConfig = {
   apiKey: "AIzaSyCJewcEeVpF83wLDuYnFljlH2b9RxVf9iI",
   authDomain: "wpb2025-d1432.firebaseapp.com",
@@ -19,7 +18,6 @@ const firebaseConfig = {
   appId: "1:834123232552:web:4acd559725a5892aa6cc1d"
 };
 
-// Initialize Firebase
 let db;
 try {
   const app = initializeApp(firebaseConfig);
@@ -28,7 +26,6 @@ try {
   console.warn("Firebase Error:", e);
 }
 
-// --- Shared Logic ---
 const generateJoinCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
 const getPeriodListForDate = (date) => {
@@ -47,7 +44,6 @@ const getLocalYMD = (date) => {
   return `${y}-${m}-${d}`;
 };
 
-// --- Tutorial Component ---
 function TutorialModal({ onClose }) {
   const [step, setStep] = useState(1);
   const totalSteps = 6;
@@ -321,9 +317,8 @@ export default function App() {
           </form>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
@@ -355,7 +350,6 @@ export default function App() {
   );
 }
 
-// --- MyScheduleView ---
 function MyScheduleView({ user }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
