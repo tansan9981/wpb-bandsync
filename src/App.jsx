@@ -30,6 +30,7 @@ try {
 
 // --- Shared Logic & Constants ---
 const BAND_CATEGORIES = ['通年バンド', '企画バンド', '復活バンド', '卒コンバンド', 'その他'];
+const STUDIO_OPTIONS = ['1st.', '2st.', 'その他'];
 
 const getBandCategoryBadgeStyle = (category) => {
   switch (category) {
@@ -43,6 +44,17 @@ const getBandCategoryBadgeStyle = (category) => {
       return 'bg-rose-50 text-rose-700 border-rose-200';
     default:
       return 'bg-gray-100 text-gray-700 border-gray-200';
+  }
+};
+
+const getStudioBadgeStyle = (studio) => {
+  switch (studio) {
+    case '1st.':
+      return 'bg-indigo-600 text-white border-indigo-700';
+    case '2st.':
+      return 'bg-emerald-600 text-white border-emerald-700';
+    default:
+      return 'bg-amber-500 text-white border-amber-600';
   }
 };
 
@@ -86,6 +98,8 @@ const getPeriodListForDate = (date) => {
   return base;
 };
 
+const PERIOD_ORDER = { '1': 1, '2': 2, 'lunch': 3, '3': 4, '4': 5, '5': 6, '6': 7 };
+
 const formatPeriod = (p) => p === 'lunch' ? '昼休み' : `${p}限`;
 
 const getLocalYMD = (date) => {
@@ -93,6 +107,65 @@ const getLocalYMD = (date) => {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+};
+
+const formatYMDWithDay = (ymdStr) => {
+  if (!ymdStr) return '';
+  const parts = ymdStr.split('-').map(Number);
+  if (parts.length !== 3) return ymdStr;
+  const [y, m, d] = parts;
+  const dt = new Date(y, m - 1, d);
+  const dayName = ['日', '月', '火', '水', '木', '金', '土'][dt.getDay()];
+  return `${m}/${d}(${dayName})`;
+};
+
+// 特定のユーザーの「バンド練習」＋「個人練習」をすべて集約して日時順に並べる関数
+const collectUserAllPractices = (targetUserObj, allGroupsList) => {
+  if (!targetUserObj) return [];
+  const list = [];
+
+  // 1. 個人練習
+  const personal = Array.isArray(targetUserObj.personalPractices) ? targetUserObj.personalPractices : [];
+  personal.forEach(p => {
+    if (p && p.date && p.period) {
+      list.push({
+        key: `personal_${p.date}_${p.period}`,
+        type: 'personal',
+        title: '個人練習',
+        date: p.date,
+        period: p.period,
+        studio: p.studio || '1st.'
+      });
+    }
+  });
+
+  // 2. 参加中のバンドグループの練習（閲覧者として参加しているグループは除く）
+  (allGroupsList || []).forEach(g => {
+    const isMember = Array.isArray(g.members) && g.members.includes(targetUserObj.id);
+    const isViewer = Array.isArray(g.viewers) && g.viewers.includes(targetUserObj.id);
+    if (isMember && !isViewer && Array.isArray(g.practices)) {
+      g.practices.forEach(gp => {
+        if (gp && gp.date && gp.period) {
+          list.push({
+            key: `band_${g.id}_${gp.date}_${gp.period}`,
+            type: 'band',
+            groupId: g.id,
+            title: g.name,
+            date: gp.date,
+            period: gp.period,
+            studio: gp.studio || '1st.'
+          });
+        }
+      });
+    }
+  });
+
+  list.sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+    return (PERIOD_ORDER[a.period] || 99) - (PERIOD_ORDER[b.period] || 99);
+  });
+
+  return list;
 };
 
 // --- Tutorial Component ---
@@ -118,7 +191,7 @@ function TutorialModal({ onClose }) {
               </div>
               <h3 className="text-xl font-bold text-gray-900">ようこそ！<br/>WPB BandSyncへ</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                このアプリは、バンドやサークルメンバー同士の<strong>「スケジュール調整」を劇的に簡単にする</strong>ために作られた専用アプリです。<br/><br/>
+                このアプリは、バンドやサークルメンバー同士の<strong>「スケジュール調整・練習管理」を劇的に簡単にする</strong>ために作られた専用アプリです。<br/><br/>
                 使い方の基本を順番にご説明します。
               </p>
             </div>
@@ -129,10 +202,10 @@ function TutorialModal({ onClose }) {
               <div className="w-16 h-16 bg-red-100 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-2">
                 <span className="text-3xl font-bold">×</span>
               </div>
-              <h3 className="text-lg font-bold text-gray-900">1. マイ予定を入力しよう</h3>
+              <h3 className="text-lg font-bold text-gray-900">1. マイ予定・個人練習の入力</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
                 「マイ予定」タブからカレンダーの日付をタップします。<br/><br/>
-                画面に表示されるボタンから<strong className="text-red-500">行けない（×）</strong>や<strong className="text-amber-500">微妙（△）</strong>のモードを選び、該当する時限（1限など）のボタンをタップするだけで登録完了です！
+                <strong className="text-red-500">行けない（×）</strong>や<strong className="text-amber-500">微妙（△）</strong>の登録だけでなく、<strong>「個人練習（1st. / 2st. / その他）」</strong>もその場で登録できます！
               </p>
             </div>
           )}
@@ -145,8 +218,8 @@ function TutorialModal({ onClose }) {
               </div>
               <h3 className="text-lg font-bold text-gray-900">2. 繰り返しと期間設定</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                「毎週」「毎月」などの繰り返しは、<strong>「開始日〜終了日」の期間を指定して</strong>登録できるようになりました。<br/><br/>
-                また、<strong>「この日を一括で設定（全日）」</strong>のボタンを使えば、1日丸ごとの予定をまとめて入力・切り替え・解除できます！
+                「毎週」「毎月」などの繰り返しは、<strong>「開始日〜終了日」の期間を指定して</strong>登録できます。<br/><br/>
+                また、<strong>「この日を一括で設定（全日）」</strong>のボタンを使えば、1日丸ごとの予定をまとめて入力・解除できます！
               </p>
             </div>
           )}
@@ -169,10 +242,10 @@ function TutorialModal({ onClose }) {
               <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-2">
                 <Users size={32} />
               </div>
-              <h3 className="text-lg font-bold text-gray-900">4. グループ参加と閲覧者モード</h3>
+              <h3 className="text-lg font-bold text-gray-900">4. バンド練習決定＆共有メモ</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                「グループ」タブから、バンドのグループを<strong>「新規作成」</strong>するか、<strong>6桁の参加コード</strong>で参加します。<br/><br/>
-                参加する時だけでなく、<strong>グループに入った後でも「メンバー ⇄ 閲覧者（予定に影響しない）」をいつでも切り替え</strong>られます！
+                バンドグループのカレンダーから、<strong>「1st.」「2st.」「その他」を選んでバンド練習日時を決定</strong>できます。<br/><br/>
+                決まった練習や個人練習は、<strong>全員のプロフィール（マイページ）に自動で一覧表示</strong>されます！誰でも書けるグループメモ欄も活用してください。
               </p>
             </div>
           )}
@@ -295,6 +368,7 @@ export default function App() {
           year: authForm.year,
           parts: authForm.parts,
           bands: [],
+          personalPractices: [],
           createdAt: new Date().toISOString()
         };
         const q = query(collection(db, "users"), where("username", "==", authForm.username));
@@ -408,7 +482,7 @@ export default function App() {
       </header>
       
       <main className="flex-1 w-full max-w-md mx-auto pb-20 relative">
-        {activeTab === 'mySchedule' && <MyScheduleView user={user} />}
+        {activeTab === 'mySchedule' && <MyScheduleView user={user} setUser={setUser} />}
         {activeTab === 'groups' && <GroupsView user={user} activeGroup={activeGroup} setActiveGroup={setActiveGroup} />}
         {activeTab === 'profile' && <ProfileView user={user} setUser={setUser} setShowTutorial={setShowTutorial} handleLogout={handleLogout} />}
         {activeTab === 'admin' && user.username === 'Boss' && <AdminView />}
@@ -429,11 +503,12 @@ export default function App() {
 }
 
 // --- MyScheduleView ---
-function MyScheduleView({ user }) {
+function MyScheduleView({ user, setUser }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
   const [mySchedules, setMySchedules] = useState([]);
-  const [bossSchedules, setBossSchedules] = useState([]); 
+  const [bossSchedules, setBossSchedules] = useState([]);
+  const [myGroups, setMyGroups] = useState([]);
   
   const [inputStatus, setInputStatus] = useState('x'); 
   const [customText, setCustomText] = useState(''); 
@@ -441,12 +516,29 @@ function MyScheduleView({ user }) {
 
   const [confirmDialog, setConfirmDialog] = useState(null);
 
+  const saveUserToLocalStorage = (updatedUser) => {
+    const storedAuth = localStorage.getItem('wpb_bandsync_auth');
+    if (storedAuth) {
+      try {
+        const parsed = JSON.parse(storedAuth);
+        parsed.userData = updatedUser;
+        localStorage.setItem('wpb_bandsync_auth', JSON.stringify(parsed));
+      } catch (e) {
+        console.warn("Storage update error", e);
+      }
+    }
+  };
+
   useEffect(() => {
     if (!db) return;
-    const fetchSchedules = async () => {
+    const fetchSchedulesAndGroups = async () => {
       const q = query(collection(db, "schedules"), where("userId", "==", user.id));
       const snap = await getDocs(q);
       setMySchedules(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+
+      const groupQ = query(collection(db, "groups"), where("members", "array-contains", user.id));
+      const groupSnap = await getDocs(groupQ);
+      setMyGroups(groupSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       const usersSnap = await getDocs(query(collection(db, "users"), where("username", "==", "Boss")));
       if (!usersSnap.empty) {
@@ -456,8 +548,69 @@ function MyScheduleView({ user }) {
         setBossSchedules(bossSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       }
     };
-    fetchSchedules();
+    fetchSchedulesAndGroups();
   }, [user]);
+
+  // 指定した日・時限の「個人練習」を取得
+  const getPersonalPracticeForSlot = (date, period) => {
+    const dStr = getLocalYMD(date);
+    const list = Array.isArray(user.personalPractices) ? user.personalPractices : [];
+    return list.find(p => p.date === dStr && p.period === period) || null;
+  };
+
+  // 指定した日・時限に入っている「参加バンドの練習」一覧を取得
+  const getBandPracticesForSlot = (date, period) => {
+    const dStr = getLocalYMD(date);
+    const results = [];
+    myGroups.forEach(g => {
+      const isViewer = Array.isArray(g.viewers) && g.viewers.includes(user.id);
+      if (!isViewer && Array.isArray(g.practices)) {
+        g.practices.forEach(gp => {
+          if (gp.date === dStr && gp.period === period) {
+            results.push({ groupId: g.id, groupName: g.name, studio: gp.studio || '1st.' });
+          }
+        });
+      }
+    });
+    return results;
+  };
+
+  // 個人練習の登録・スタジオ変更・解除
+  const handleTogglePersonalPractice = async (date, period, studio) => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      const dStr = getLocalYMD(date);
+      const currentList = Array.isArray(user.personalPractices) ? user.personalPractices : [];
+      const existing = currentList.find(p => p.date === dStr && p.period === period);
+
+      let updatedList;
+      if (existing && existing.studio === studio) {
+        // 同じスタジオをもう一度押したら解除
+        updatedList = currentList.filter(p => !(p.date === dStr && p.period === period));
+      } else if (existing) {
+        // 別のスタジオを押したらスタジオ変更
+        updatedList = currentList.map(p =>
+          p.date === dStr && p.period === period ? { ...p, studio } : p
+        );
+      } else {
+        // 新規登録
+        updatedList = [
+          ...currentList,
+          { id: `pp_${Date.now()}_${period}`, date: dStr, period, studio }
+        ];
+      }
+
+      await updateDoc(doc(db, "users", user.id), { personalPractices: updatedList });
+      const updatedUser = { ...user, personalPractices: updatedList };
+      setUser(updatedUser);
+      saveUserToLocalStorage(updatedUser);
+    } catch (e) {
+      alert("個人練習の更新に失敗しました: " + e.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const computeScheduleRule = (schedulesList, date, period) => {
     const rules = schedulesList.filter(r => r.period === period);
@@ -773,6 +926,8 @@ function MyScheduleView({ user }) {
       let hasX = false;
       let hasTriangle = false;
       let hasOk = false;
+      let hasPersonalPractice = false;
+      let hasBandPractice = false;
       
       periods.forEach(p => {
         const rule = getScheduleRule(d, p);
@@ -781,22 +936,27 @@ function MyScheduleView({ user }) {
           else if (rule.status === 'triangle') hasTriangle = true;
           else if (rule.status === 'x') hasX = true;
         }
+        if (getPersonalPracticeForSlot(d, p)) hasPersonalPractice = true;
+        if (getBandPracticesForSlot(d, p).length > 0) hasBandPractice = true;
       });
       
       let bgColor = 'bg-white border-gray-200';
-      if (hasX) bgColor = 'bg-white border-gray-200';
+      if (hasBandPractice || hasPersonalPractice) bgColor = 'bg-purple-50 border-purple-200';
+      else if (hasX) bgColor = 'bg-white border-gray-200';
       else if (hasTriangle) bgColor = 'bg-amber-50 border-amber-100';
       else if (hasOk) bgColor = 'bg-blue-50 border-blue-100';
       else bgColor = 'bg-indigo-50 border-indigo-100';
 
       days.push(
         <div key={i} onClick={() => setSelectedDate(d)} className="p-1 cursor-pointer">
-          <div className={`h-12 rounded-xl flex flex-col items-center justify-center border ${bgColor} ${selectedDate?.toDateString() === d.toDateString() ? 'ring-2 ring-indigo-500' : ''}`}>
+          <div className={`h-13 rounded-xl flex flex-col items-center justify-center border ${bgColor} ${selectedDate?.toDateString() === d.toDateString() ? 'ring-2 ring-indigo-500' : ''}`}>
             <span className={`text-sm font-medium ${d.getDay()===0 ? 'text-red-500' : d.getDay()===6 ? 'text-blue-500' : 'text-gray-700'}`}>{i}</span>
-            <div className="flex gap-0.5 mt-0.5 text-[12px] leading-none font-bold">
-              {hasX && <span className="text-red-500">×</span>}
-              {!hasX && hasTriangle && <span className="text-amber-500">△</span>}
-              {!hasX && !hasTriangle && hasOk && <span className="text-blue-500">〇</span>}
+            <div className="flex items-center gap-0.5 mt-0.5 text-[10px] leading-none font-bold">
+              {hasBandPractice && <span className="bg-indigo-600 text-white px-1 py-0.5 rounded text-[8px]">練</span>}
+              {hasPersonalPractice && <span className="bg-purple-600 text-white px-1 py-0.5 rounded text-[8px]">個</span>}
+              {hasX && <span className="text-red-500 text-[11px]">×</span>}
+              {!hasX && hasTriangle && <span className="text-amber-500 text-[11px]">△</span>}
+              {!hasX && !hasTriangle && hasOk && <span className="text-blue-500 text-[11px]">〇</span>}
             </div>
           </div>
         </div>
@@ -825,7 +985,7 @@ function MyScheduleView({ user }) {
     return (
       <div className={`p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-4 animate-in slide-in-from-bottom-4 transition-opacity ${isProcessing ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-bold text-gray-800">{selectedDate.getMonth() + 1}/{selectedDate.getDate()} の予定</h3>
+          <h3 className="text-lg font-bold text-gray-800">{selectedDate.getMonth() + 1}/{selectedDate.getDate()} の予定・個人練習</h3>
           <button onClick={() => setSelectedDate(null)} className="p-1 bg-gray-100 rounded-full hover:bg-gray-200"><X size={16}/></button>
         </div>
         
@@ -856,9 +1016,7 @@ function MyScheduleView({ user }) {
         )}
 
         <p className="text-[10px] text-gray-500 mb-4 bg-gray-50 p-2 rounded-lg leading-relaxed">
-          上のボタンでモードを選択後、下の枠をタップしてください。<br/>
-          {isBoss && <span className="text-indigo-700 font-bold">管理者権限：</span>}
-          <span className="text-blue-600 font-bold">「〇 臨時OK」</span>は「この日」のみ選択可能です。
+          各時限の下段にある<strong>「個人練習（1st. / 2st. / その他）」</strong>ボタンを押すと、自分のプロフィールに個人練習として登録されます。
         </p>
 
         <div className="mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
@@ -896,10 +1054,12 @@ function MyScheduleView({ user }) {
           </div>
         </div>
 
-        <div className="space-y-2.5 border-t border-gray-100 pt-3">
+        <div className="space-y-3 border-t border-gray-100 pt-3">
           {periods.map(period => {
             const rule = getScheduleRule(selectedDate, period);
             const bossRule = getBossRule(selectedDate, period);
+            const personalPrac = getPersonalPracticeForSlot(selectedDate, period);
+            const bandPracs = getBandPracticesForSlot(selectedDate, period);
 
             const isActive = !!rule;
             const activeType = rule ? rule.type : null;
@@ -935,12 +1095,29 @@ function MyScheduleView({ user }) {
             return (
               <div 
                 key={period} 
-                className="p-2.5 rounded-2xl border bg-gray-50/70 border-gray-200/80 transition-all"
+                className="p-2.5 rounded-2xl border bg-gray-50/70 border-gray-200/80 transition-all space-y-2"
               >
                 {bossNoticeText && (
-                  <div className="mb-2 px-2.5 py-1.5 bg-white text-gray-800 rounded-xl text-[11px] font-bold flex items-center gap-1.5 border border-gray-200 shadow-sm">
+                  <div className="px-2.5 py-1.5 bg-white text-gray-800 rounded-xl text-[11px] font-bold flex items-center gap-1.5 border border-gray-200 shadow-sm">
                     <AlertTriangle size={14} className="shrink-0 text-amber-500" />
                     <span>【{formatPeriod(period)}】管理者連絡: {bossNoticeText}</span>
+                  </div>
+                )}
+
+                {/* 決定済みのバンド練習がある場合の表示 */}
+                {bandPracs.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {bandPracs.map((bp, bIdx) => (
+                      <div
+                        key={bIdx}
+                        className="w-full px-2.5 py-1.5 bg-indigo-50 border border-indigo-200 rounded-xl text-[11px] font-bold text-indigo-900 flex items-center justify-between"
+                      >
+                        <span>バンド練習: {bp.groupName}</span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getStudioBadgeStyle(bp.studio)}`}>
+                          {bp.studio}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 )}
                 
@@ -970,6 +1147,41 @@ function MyScheduleView({ user }) {
                         </button>
                       );
                     })}
+                  </div>
+                </div>
+
+                {/* 個人練習の選択（1st. / 2st. / その他） */}
+                <div className="pt-1.5 border-t border-gray-200/70 flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-bold text-purple-800 shrink-0">
+                    個人練習:
+                  </span>
+                  <div className="flex-1 flex gap-1">
+                    {STUDIO_OPTIONS.map(st => {
+                      const isSelected = personalPrac && personalPrac.studio === st;
+                      return (
+                        <button
+                          type="button"
+                          key={st}
+                          onClick={() => handleTogglePersonalPractice(selectedDate, period, st)}
+                          className={`flex-1 py-1 rounded-lg text-[10px] font-bold border transition-all ${
+                            isSelected
+                              ? 'bg-purple-600 text-white border-purple-700 shadow-xs'
+                              : 'bg-white text-gray-600 border-gray-200 hover:bg-purple-50'
+                          }`}
+                        >
+                          {isSelected ? `✓ ${st}` : st}
+                        </button>
+                      );
+                    })}
+                    {personalPrac && (
+                      <button
+                        type="button"
+                        onClick={() => handleTogglePersonalPractice(selectedDate, period, personalPrac.studio)}
+                        className="px-2 py-1 rounded-lg text-[10px] font-bold bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-600 border border-gray-200"
+                      >
+                        解除
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1092,6 +1304,7 @@ function MyScheduleView({ user }) {
 // --- GroupsView ---
 function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [groups, setGroups] = useState([]);
+  const [allGroupsInDb, setAllGroupsInDb] = useState([]); // 全メンバーの練習予定を算出するための全グループ配列
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
@@ -1100,6 +1313,12 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   
   const [isEditingGroupName, setIsEditingGroupName] = useState(false);
   const [editingGroupName, setEditingGroupName] = useState('');
+
+  // グループ共有メモ用ステート
+  const [groupMemo, setGroupMemo] = useState('');
+  const [isSavingMemo, setIsSavingMemo] = useState(false);
+  const [memoSavedMessage, setMemoSavedMessage] = useState('');
+  const [isMemoOpen, setIsMemoOpen] = useState(true);
 
   // 各種ワンクッション確認モーダル用ステート
   const [showDeleteGroupModal, setShowDeleteGroupModal] = useState(false);
@@ -1117,6 +1336,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [listFilter, setListFilter] = useState('all'); 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
+  const [isUpdatingPractice, setIsUpdatingPractice] = useState(false);
 
   // 特定のメンバーだけで予定を合わせるためのメンバーフィルター（ON / OFF）用ステート
   const [showMemberFilterPanel, setShowMemberFilterPanel] = useState(true);
@@ -1131,9 +1351,10 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   useEffect(() => {
     if (!db) return;
     const fetchGroups = async () => {
-      const q = query(collection(db, "groups"), where("members", "array-contains", user.id));
-      const snap = await getDocs(q);
-      setGroups(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const snapAll = await getDocs(collection(db, "groups"));
+      const allG = snapAll.docs.map(d => ({ id: d.id, ...d.data() }));
+      setAllGroupsInDb(allG);
+      setGroups(allG.filter(g => Array.isArray(g.members) && g.members.includes(user.id)));
     };
     fetchGroups();
   }, [user]);
@@ -1141,6 +1362,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   useEffect(() => {
     setExcludedMemberIds([]);
     if (activeGroup && db) {
+      setGroupMemo(activeGroup.memo || '');
       const fetchDetails = async () => {
         const snapM = await getDocs(collection(db, "users"));
         const allU = snapM.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -1151,6 +1373,9 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         const snapS = await getDocs(collection(db, "schedules"));
         const allS = snapS.docs.map(d => ({ id: d.id, ...d.data() }));
         setAllSchedules(allS);
+
+        const snapG = await getDocs(collection(db, "groups"));
+        setAllGroupsInDb(snapG.docs.map(d => ({ id: d.id, ...d.data() })));
       };
       fetchDetails();
     }
@@ -1162,6 +1387,70 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     return groupObj.viewers.includes(targetUserId);
   };
 
+  // グループ共有メモを保存する処理
+  const handleSaveGroupMemo = async () => {
+    if (!activeGroup || isSavingMemo) return;
+    setIsSavingMemo(true);
+    setMemoSavedMessage('');
+    try {
+      await updateDoc(doc(db, "groups", activeGroup.id), { memo: groupMemo });
+      const updatedGroup = { ...activeGroup, memo: groupMemo };
+      setActiveGroup(updatedGroup);
+      setGroups(groups.map(g => g.id === activeGroup.id ? updatedGroup : g));
+      setAllGroupsInDb(allGroupsInDb.map(g => g.id === activeGroup.id ? updatedGroup : g));
+      setMemoSavedMessage('保存しました！');
+      setTimeout(() => setMemoSavedMessage(''), 2500);
+    } catch (e) {
+      alert("メモの保存に失敗しました: " + e.message);
+    } finally {
+      setIsSavingMemo(false);
+    }
+  };
+
+  // バンド練習日時限の決定・スタジオ変更・解除
+  const handleToggleBandPractice = async (date, period, studio) => {
+    if (!activeGroup || isUpdatingPractice) return;
+    setIsUpdatingPractice(true);
+    try {
+      const dStr = getLocalYMD(date);
+      const currentPractices = Array.isArray(activeGroup.practices) ? activeGroup.practices : [];
+      const existing = currentPractices.find(p => p.date === dStr && p.period === period);
+
+      let updatedPractices;
+      if (existing && existing.studio === studio) {
+        // 同じスタジオをもう一度押したら練習解除
+        updatedPractices = currentPractices.filter(p => !(p.date === dStr && p.period === period));
+      } else if (existing) {
+        // 別のスタジオボタンを押したらスタジオ変更
+        updatedPractices = currentPractices.map(p =>
+          p.date === dStr && p.period === period ? { ...p, studio } : p
+        );
+      } else {
+        // 新規に練習日時限を決定
+        updatedPractices = [
+          ...currentPractices,
+          { id: `bp_${Date.now()}_${period}`, date: dStr, period, studio, updatedBy: user.displayName }
+        ];
+      }
+
+      await updateDoc(doc(db, "groups", activeGroup.id), { practices: updatedPractices });
+      const updatedGroup = { ...activeGroup, practices: updatedPractices };
+      setActiveGroup(updatedGroup);
+      setGroups(groups.map(g => g.id === activeGroup.id ? updatedGroup : g));
+      setAllGroupsInDb(allGroupsInDb.map(g => g.id === activeGroup.id ? updatedGroup : g));
+    } catch (e) {
+      alert("練習予定の更新に失敗しました: " + e.message);
+    } finally {
+      setIsUpdatingPractice(false);
+    }
+  };
+
+  const getBandPracticeForSlot = (date, period) => {
+    const dStr = getLocalYMD(date);
+    const list = Array.isArray(activeGroup?.practices) ? activeGroup.practices : [];
+    return list.find(p => p.date === dStr && p.period === period) || null;
+  };
+
   const handleCreateGroup = async () => {
     if (!newGroupName.trim()) return;
     try {
@@ -1170,11 +1459,15 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         joinCode: generateJoinCode(),
         members: [user.id],
         viewers: [],
+        practices: [],
+        memo: '',
         createdBy: user.id,
         createdAt: new Date().toISOString()
       };
       const docRef = await addDoc(collection(db, "groups"), newGroup);
-      setGroups([...groups, { id: docRef.id, ...newGroup }]);
+      const createdObj = { id: docRef.id, ...newGroup };
+      setGroups([...groups, createdObj]);
+      setAllGroupsInDb([...allGroupsInDb, createdObj]);
       setNewGroupName('');
       setShowCreate(false);
     } catch(e) { alert("グループ作成エラー"); }
@@ -1214,6 +1507,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         } else {
           setGroups([...groups, updatedGroupObj]);
         }
+        setAllGroupsInDb(allGroupsInDb.map(g => g.id === groupDoc.id ? updatedGroupObj : g));
 
         setJoinCode('');
         setJoinAsViewer(false);
@@ -1227,8 +1521,10 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     try {
       const trimmed = editingGroupName.trim();
       await updateDoc(doc(db, "groups", activeGroup.id), { name: trimmed });
-      setActiveGroup({ ...activeGroup, name: trimmed });
-      setGroups(groups.map(g => g.id === activeGroup.id ? { ...g, name: trimmed } : g));
+      const updated = { ...activeGroup, name: trimmed };
+      setActiveGroup(updated);
+      setGroups(groups.map(g => g.id === activeGroup.id ? updated : g));
+      setAllGroupsInDb(allGroupsInDb.map(g => g.id === activeGroup.id ? updated : g));
       setIsEditingGroupName(false);
     } catch (e) {
       alert("グループ名の変更に失敗しました: " + e.message);
@@ -1257,7 +1553,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         viewers: newViewers
       });
 
-      // 閲覧者からメンバーに戻った際、メンバーフィルターでOFFになっていた場合はONに戻す
       if (currentlyViewer) {
         setExcludedMemberIds(prev => prev.filter(id => id !== user.id));
       }
@@ -1265,6 +1560,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       const updatedGroup = { ...activeGroup, members: ensuredMembers, viewers: newViewers };
       setActiveGroup(updatedGroup);
       setGroups(groups.map(g => g.id === activeGroup.id ? updatedGroup : g));
+      setAllGroupsInDb(allGroupsInDb.map(g => g.id === activeGroup.id ? updatedGroup : g));
       setShowRoleSwitchModal(false);
     } catch (e) {
       alert("参加モードの切り替えに失敗しました: " + e.message);
@@ -1280,6 +1576,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     try {
       await deleteDoc(doc(db, "groups", activeGroup.id));
       setGroups(groups.filter(g => g.id !== activeGroup.id));
+      setAllGroupsInDb(allGroupsInDb.filter(g => g.id !== activeGroup.id));
       setShowDeleteGroupModal(false);
       setActiveGroup(null);
     } catch (e) {
@@ -1301,6 +1598,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         viewers: newViewers
       });
       setGroups(groups.filter(g => g.id !== activeGroup.id));
+      setAllGroupsInDb(allGroupsInDb.map(g => g.id === activeGroup.id ? { ...g, members: newMembers, viewers: newViewers } : g));
       setShowLeaveGroupModal(false);
       setActiveGroup(null);
     } catch (e) {
@@ -1325,6 +1623,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       const updatedGroup = { ...activeGroup, members: newMembers, viewers: newViewers };
       setActiveGroup(updatedGroup);
       setGroups(groups.map(g => g.id === activeGroup.id ? updatedGroup : g));
+      setAllGroupsInDb(allGroupsInDb.map(g => g.id === activeGroup.id ? updatedGroup : g));
       setGroupMembers(groupMembers.filter(m => m.id !== targetId || m.username === 'Boss'));
       setExcludedMemberIds(prev => prev.filter(id => id !== targetId));
       setMemberToRemove(null);
@@ -1791,11 +2090,24 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       for (let i = 1; i <= daysInMonth; i++) {
         const d = new Date(currentDate.getFullYear(), currentDate.getMonth(), i);
         const status = getDayStatus(d);
+        const dStr = getLocalYMD(d);
+        const dayPractices = (activeGroup.practices || []).filter(p => p.date === dStr);
+        const hasPracticeOnDay = dayPractices.length > 0;
         
         let bgColor = 'bg-white border border-gray-100';
         let icon = null;
 
-        if (status.dayStatus === 'ok') {
+        if (hasPracticeOnDay) {
+          bgColor = 'bg-indigo-50 border-2 border-indigo-400 shadow-xs';
+          icon = (
+            <div className="flex items-center gap-0.5 mt-0.5">
+              <span className="bg-indigo-600 text-white text-[8px] font-bold px-1 py-0.2 rounded">
+                練{dayPractices.length > 1 ? dayPractices.length : ''}
+              </span>
+              {status.dayStatus === 'ok' && <Check size={10} className="text-emerald-600" strokeWidth={3} />}
+            </div>
+          );
+        } else if (status.dayStatus === 'ok') {
           bgColor = 'bg-emerald-50 border border-emerald-300 shadow-sm';
           icon = <Check size={12} className="text-emerald-500 mt-1" strokeWidth={3} />;
         } else if (status.dayStatus === 'triangle') {
@@ -1805,7 +2117,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         
         days.push(
           <div key={i} onClick={() => setSelectedDate(d)} className="p-1 cursor-pointer">
-            <div className={`h-12 rounded-xl flex flex-col items-center justify-center transition-all ${bgColor} ${selectedDate?.toDateString() === d.toDateString() ? 'ring-2 ring-indigo-500' : ''}`}>
+            <div className={`h-13 rounded-xl flex flex-col items-center justify-center transition-all ${bgColor} ${selectedDate?.toDateString() === d.toDateString() ? 'ring-2 ring-indigo-500' : ''}`}>
               <span className={`text-sm font-medium ${d.getDay()===0 ? 'text-red-500' : d.getDay()===6 ? 'text-blue-500' : 'text-gray-700'}`}>{i}</span>
               {icon}
             </div>
@@ -1847,13 +2159,16 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
       return (
         <div className="p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-2">
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-3">
             <div>
               <h3 className="text-lg font-bold text-gray-800">
-                {selectedDate.getMonth() + 1}/{selectedDate.getDate()} の空き状況
+                {selectedDate.getMonth() + 1}/{selectedDate.getDate()} の空き状況・練習設定
               </h3>
+              <p className="text-[10px] text-gray-500 mt-0.5">
+                「1st.」「2st.」「その他」を選ぶとバンド練習日として全員のプロフィールに反映されます
+              </p>
               {excludedMemberIds.length > 0 && (
-                <p className="text-[11px] text-amber-700 font-bold">
+                <p className="text-[11px] text-amber-700 font-bold mt-0.5">
                   ※ONの{actualMembersCount}人（{targetPlayingMembers.map(m => m.displayName).join(', ')}）で計算中
                 </p>
               )}
@@ -1866,45 +2181,88 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
               予定を合わせるメンバーが全員OFFになっています。上部パネルでメンバーをONにしてください。
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {status.detail.map((p) => {
                 const isAllOK = p.xMembers.length === 0 && p.triangleMembers.length === 0 && actualMembersCount > 0;
                 const isTriangle = p.xMembers.length === 0 && p.triangleMembers.length > 0 && actualMembersCount > 0;
+                const bandPrac = getBandPracticeForSlot(selectedDate, p.period);
                 
                 let itemBg = 'bg-gray-50 border-gray-100';
                 let badgeBg = 'bg-gray-200 text-gray-700';
-                if (isAllOK) { itemBg = 'bg-emerald-50 border-emerald-200'; badgeBg = 'bg-emerald-200 text-emerald-800'; } 
+                if (bandPrac) { itemBg = 'bg-indigo-50/70 border-indigo-300 ring-1 ring-indigo-200'; badgeBg = 'bg-indigo-600 text-white'; }
+                else if (isAllOK) { itemBg = 'bg-emerald-50 border-emerald-200'; badgeBg = 'bg-emerald-200 text-emerald-800'; } 
                 else if (isTriangle) { itemBg = 'bg-amber-50 border-amber-200'; badgeBg = 'bg-amber-200 text-amber-800'; }
 
                 return (
-                  <div key={p.period} className={`p-3 rounded-xl flex items-center gap-3 border ${itemBg}`}>
-                    <div className={`w-14 text-center font-bold text-xs py-1.5 rounded-lg shrink-0 ${badgeBg}`}>{formatPeriod(p.period)}</div>
-                    <div className="flex-1">
-                      {p.bossNotice && (
-                        <div className="text-xs font-bold text-gray-800 flex items-center gap-1 mb-1 bg-white/90 p-1.5 rounded-lg border border-gray-200 shadow-sm">
-                          <AlertTriangle size={14} className="shrink-0 text-amber-500" />
-                          <span>【{formatPeriod(p.period)}】管理者連絡: {p.bossNotice}</span>
-                        </div>
-                      )}
-                      {isAllOK ? (
-                        <div>
-                          <span className="text-sm font-bold text-emerald-600 flex items-center gap-1">
-                            <Check size={16} />
-                            {excludedMemberIds.length > 0 ? `選択中の${actualMembersCount}人全員空いています！` : '全員空いています！'}
-                          </span>
-                          {p.okMembers.length > 0 && (
-                            <div className="text-[10px] text-blue-600 mt-1">
-                              <span className="font-bold">〇 臨時({p.okMembers.length}人):</span> {p.okMembers.map(m => m.displayName).join(', ')}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="text-xs text-gray-600 space-y-1">
-                          {p.xMembers.length > 0 && <div><span className="font-medium text-red-500">× ({p.xMembers.length}人)</span>: {p.xMembers.map(m => m.displayName).join(', ')}</div>}
-                          {p.triangleMembers.length > 0 && <div><span className="font-medium text-amber-600">△ ({p.triangleMembers.length}人)</span>: {p.triangleMembers.map(m => m.displayName).join(', ')}</div>}
-                          {p.okMembers.length > 0 && <div><span className="font-medium text-blue-600">〇 臨時({p.okMembers.length}人)</span>: {p.okMembers.map(m => m.displayName).join(', ')}</div>}
-                        </div>
-                      )}
+                  <div key={p.period} className={`p-3 rounded-xl border space-y-2 ${itemBg}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-14 text-center font-bold text-xs py-1.5 rounded-lg shrink-0 ${badgeBg}`}>
+                        {formatPeriod(p.period)}
+                      </div>
+                      <div className="flex-1">
+                        {p.bossNotice && (
+                          <div className="text-xs font-bold text-gray-800 flex items-center gap-1 mb-1 bg-white/90 p-1.5 rounded-lg border border-gray-200 shadow-sm">
+                            <AlertTriangle size={14} className="shrink-0 text-amber-500" />
+                            <span>【{formatPeriod(p.period)}】管理者連絡: {p.bossNotice}</span>
+                          </div>
+                        )}
+                        {isAllOK ? (
+                          <div>
+                            <span className="text-sm font-bold text-emerald-600 flex items-center gap-1">
+                              <Check size={16} />
+                              {excludedMemberIds.length > 0 ? `選択中の${actualMembersCount}人全員空いています！` : '全員空いています！'}
+                            </span>
+                            {p.okMembers.length > 0 && (
+                              <div className="text-[10px] text-blue-600 mt-1">
+                                <span className="font-bold">〇 臨時({p.okMembers.length}人):</span> {p.okMembers.map(m => m.displayName).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-gray-600 space-y-1">
+                            {p.xMembers.length > 0 && <div><span className="font-medium text-red-500">× ({p.xMembers.length}人)</span>: {p.xMembers.map(m => m.displayName).join(', ')}</div>}
+                            {p.triangleMembers.length > 0 && <div><span className="font-medium text-amber-600">△ ({p.triangleMembers.length}人)</span>: {p.triangleMembers.map(m => m.displayName).join(', ')}</div>}
+                            {p.okMembers.length > 0 && <div><span className="font-medium text-blue-600">〇 臨時({p.okMembers.length}人)</span>: {p.okMembers.map(m => m.displayName).join(', ')}</div>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* バンド練習決定＆スタジオ選択（1st. / 2st. / その他） */}
+                    <div className="pt-2 border-t border-gray-200/70 flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-bold text-indigo-900 shrink-0">
+                        {bandPrac ? `練習決定済 (${bandPrac.studio}):` : '練習決定:'}
+                      </span>
+                      <div className="flex-1 flex gap-1">
+                        {STUDIO_OPTIONS.map(st => {
+                          const isSelected = bandPrac && bandPrac.studio === st;
+                          return (
+                            <button
+                              type="button"
+                              key={st}
+                              disabled={isUpdatingPractice}
+                              onClick={() => handleToggleBandPractice(selectedDate, p.period, st)}
+                              className={`flex-1 py-1 rounded-lg text-[10px] font-bold border transition-all ${
+                                isSelected
+                                  ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                                  : 'bg-white text-gray-700 border-gray-200 hover:bg-indigo-50'
+                              }`}
+                            >
+                              {isSelected ? `✓ ${st}` : st}
+                            </button>
+                          );
+                        })}
+                        {bandPrac && (
+                          <button
+                            type="button"
+                            disabled={isUpdatingPractice}
+                            onClick={() => handleToggleBandPractice(selectedDate, p.period, bandPrac.studio)}
+                            className="px-2 py-1 rounded-lg text-[10px] font-bold bg-white text-red-600 border border-red-200 hover:bg-red-50"
+                          >
+                            解除
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -1964,7 +2322,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             }
           });
 
-          // ONになっている対象メンバーのスケジュールのみ計算
           targetPlayingMembers.forEach(m => {
             const rule = getUserScheduleRule(m.id, d, p);
             if (rule) {
@@ -2065,28 +2422,38 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                             </span>
                           </div>
                           <div className="flex flex-wrap gap-1.5">
-                            {sItem.periods.map(p => (
-                              <div 
-                                key={p.period} 
-                                className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 border ${
-                                  p.category === 1 
-                                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
-                                    : 'bg-blue-50 text-blue-800 border-blue-200'
-                                }`}
-                              >
-                                <span>{ p.category === 1 ? '◎' : '〇' } {formatPeriod(p.period)}</span>
-                                {p.category === 2 && (
-                                  <span className="text-[9px] font-normal text-blue-700">
-                                    (△:{p.triangleMembers.map(m => m.displayName).join(',')})
-                                  </span>
-                                )}
-                                {p.bossNotice && (
-                                  <span className="text-[9px] bg-amber-100 text-amber-800 px-1 py-0.5 rounded border border-amber-300">
-                                    ※{p.bossNotice}
-                                  </span>
-                                )}
-                              </div>
-                            ))}
+                            {sItem.periods.map(p => {
+                              const bp = getBandPracticeForSlot(sItem.date, p.period);
+                              return (
+                                <div 
+                                  key={p.period} 
+                                  className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 border ${
+                                    bp
+                                      ? 'bg-indigo-100 text-indigo-900 border-indigo-300'
+                                      : p.category === 1 
+                                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                                        : 'bg-blue-50 text-blue-800 border-blue-200'
+                                  }`}
+                                >
+                                  <span>{ p.category === 1 ? '◎' : '〇' } {formatPeriod(p.period)}</span>
+                                  {bp && (
+                                    <span className="text-[9px] bg-indigo-600 text-white px-1 py-0.2 rounded">
+                                      練:{bp.studio}
+                                    </span>
+                                  )}
+                                  {p.category === 2 && (
+                                    <span className="text-[9px] font-normal text-blue-700">
+                                      (△:{p.triangleMembers.map(m => m.displayName).join(',')})
+                                    </span>
+                                  )}
+                                  {p.bossNotice && (
+                                    <span className="text-[9px] bg-amber-100 text-amber-800 px-1 py-0.5 rounded border border-amber-300">
+                                      ※{p.bossNotice}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       );
@@ -2150,11 +2517,22 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                         else if (dp.category === 3) badge = <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">△ 一部NG(残〇)</span>;
                         else if (dp.category === 4) badge = <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">▲ 要調整(△有)</span>;
 
+                        const bandPrac = getBandPracticeForSlot(item.date, dp.period);
+
                         return (
-                          <div key={dp.period} className="flex flex-col gap-1.5 p-2.5 rounded-xl border bg-gray-50 border-gray-100">
-                            <div className="flex items-center gap-3">
-                              <span className="font-bold text-gray-800 w-12 text-center text-sm">{formatPeriod(dp.period)}</span>
-                              {badge}
+                          <div key={dp.period} className={`flex flex-col gap-2 p-2.5 rounded-xl border ${
+                            bandPrac ? 'bg-indigo-50/70 border-indigo-300' : 'bg-gray-50 border-gray-100'
+                          }`}>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-3">
+                                <span className="font-bold text-gray-800 w-12 text-center text-sm">{formatPeriod(dp.period)}</span>
+                                {badge}
+                              </div>
+                              {bandPrac && (
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getStudioBadgeStyle(bandPrac.studio)}`}>
+                                  練習決定: {bandPrac.studio}
+                                </span>
+                              )}
                             </div>
                             
                             {dp.bossNotice && (
@@ -2165,7 +2543,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                             )}
 
                             {(dp.xMembers.length > 0 || dp.triangleMembers.length > 0 || dp.okMembers.length > 0) && (
-                              <div className="text-[11px] ml-14 space-y-0.5 mt-1">
+                              <div className="text-[11px] ml-14 space-y-0.5">
                                 {dp.xMembers.length > 0 && (
                                   <div className="text-red-600">
                                     <span className="font-bold">×({dp.xMembers.length}人):</span> {dp.xMembers.map(m => m.displayName).join(', ')}
@@ -2183,6 +2561,43 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                                 )}
                               </div>
                             )}
+
+                            {/* 空き日一覧からも直接練習決定・スタジオ選択が可能 */}
+                            <div className="pt-1.5 border-t border-gray-200/70 flex items-center justify-between gap-2">
+                              <span className="text-[10px] font-bold text-indigo-900 shrink-0">
+                                練習決定:
+                              </span>
+                              <div className="flex-1 flex gap-1">
+                                {STUDIO_OPTIONS.map(st => {
+                                  const isSelected = bandPrac && bandPrac.studio === st;
+                                  return (
+                                    <button
+                                      type="button"
+                                      key={st}
+                                      disabled={isUpdatingPractice}
+                                      onClick={() => handleToggleBandPractice(item.date, dp.period, st)}
+                                      className={`flex-1 py-1 rounded-lg text-[10px] font-bold border transition-all ${
+                                        isSelected
+                                          ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                                          : 'bg-white text-gray-700 border-gray-200 hover:bg-indigo-50'
+                                      }`}
+                                    >
+                                      {isSelected ? `✓ ${st}` : st}
+                                    </button>
+                                  );
+                                })}
+                                {bandPrac && (
+                                  <button
+                                    type="button"
+                                    disabled={isUpdatingPractice}
+                                    onClick={() => handleToggleBandPractice(item.date, dp.period, bandPrac.studio)}
+                                    className="px-2 py-1 rounded-lg text-[10px] font-bold bg-white text-red-600 border border-red-200 hover:bg-red-50"
+                                  >
+                                    解除
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         );
                       })}
@@ -2201,6 +2616,8 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         ? activeGroup.createdBy === m.id
         : Array.isArray(activeGroup.members) && activeGroup.members[0] === m.id;
       const isMe = m.id === user.id;
+      const todayYMD = getLocalYMD(new Date());
+      const memberUpcomingPractices = collectUserAllPractices(m, allGroupsInDb).filter(p => p.date >= todayYMD);
 
       return (
         <div key={m.id} className={`bg-white p-4 rounded-2xl shadow-sm border flex items-start gap-4 ${
@@ -2239,7 +2656,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
-                {/* 自分自身のカードには「閲覧者に変更 / メンバーに戻る」ボタンを表示 */}
                 {isMe && user.username !== 'Boss' && (
                   <button
                     type="button"
@@ -2255,7 +2671,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                   </button>
                 )}
 
-                {/* グループ作成者によるメンバー退出ボタン（自分以外） */}
                 {isGroupCreator && !isMe && (
                   <button
                     type="button"
@@ -2277,6 +2692,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
               {(!m.parts || m.parts.length === 0) && <span className="text-[10px] text-gray-400">パート未設定</span>}
             </div>
 
+            {/* 所属バンド一覧 */}
             <div className="mt-2.5 pt-2 border-t border-gray-100">
               <p className="text-[10px] font-bold text-gray-400 mb-1.5">所属バンド</p>
               {m.bands && m.bands.length > 0 ? (
@@ -2295,6 +2711,42 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                 </div>
               ) : (
                 <p className="text-[10px] text-gray-400">未登録</p>
+              )}
+            </div>
+
+            {/* 各メンバーのプロフィールの練習予定一覧（バンド練習＋個人練習） */}
+            <div className="mt-2.5 pt-2 border-t border-gray-100">
+              <p className="text-[10px] font-bold text-indigo-600 mb-1.5">
+                練習予定 ({memberUpcomingPractices.length}件)
+              </p>
+              {memberUpcomingPractices.length === 0 ? (
+                <p className="text-[10px] text-gray-400">予定されている練習はありません</p>
+              ) : (
+                <div className="space-y-1 max-h-32 overflow-y-auto pr-0.5">
+                  {memberUpcomingPractices.map(pr => (
+                    <div
+                      key={pr.key}
+                      className="flex items-center justify-between gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-[10px]"
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-bold text-gray-900 shrink-0">
+                          {formatYMDWithDay(pr.date)} {formatPeriod(pr.period)}
+                        </span>
+                        <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold shrink-0 ${
+                          pr.type === 'personal'
+                            ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                            : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                        }`}>
+                          {pr.type === 'personal' ? '個人練習' : 'バンド'}
+                        </span>
+                        <span className="font-bold text-gray-800 truncate">{pr.title}</span>
+                      </div>
+                      <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border shrink-0 ${getStudioBadgeStyle(pr.studio)}`}>
+                        {pr.studio}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </div>
@@ -2451,6 +2903,48 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
               </div>
             </div>
           )}
+
+          {/* 誰でも入力・保存できるグループ共有メモ欄 */}
+          <div className="bg-amber-50/70 rounded-2xl border border-amber-200 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setIsMemoOpen(!isMemoOpen)}
+                className="flex items-center gap-1.5 text-xs font-bold text-amber-900"
+              >
+                <Edit2 size={13} className="text-amber-600" />
+                <span>グループ共有メモ（誰でも入力・保存可）</span>
+                {isMemoOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+              {memoSavedMessage && (
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                  {memoSavedMessage}
+                </span>
+              )}
+            </div>
+
+            {isMemoOpen && (
+              <div className="space-y-2">
+                <textarea
+                  rows={3}
+                  placeholder="練習曲・セトリ・連絡事項などを自由にメモできます..."
+                  className="w-full border border-amber-200 bg-white p-2.5 rounded-xl text-xs text-gray-800 focus:ring-2 focus:ring-amber-400"
+                  value={groupMemo}
+                  onChange={e => setGroupMemo(e.target.value)}
+                />
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    disabled={isSavingMemo}
+                    onClick={handleSaveGroupMemo}
+                    className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-xs transition-colors disabled:opacity-50"
+                  >
+                    {isSavingMemo ? '保存中...' : 'メモを保存'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex p-2 bg-gray-100 mx-4 mt-4 rounded-xl overflow-x-auto hide-scrollbar gap-1">
@@ -2649,7 +3143,6 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             onChange={e => setJoinCode(e.target.value)}
           />
 
-          {/* 参加方法（メンバー or 閲覧者）の選択 */}
           <div>
             <span className="block text-[11px] font-bold text-gray-700 mb-1.5">参加方法を選択（参加後もいつでも変更できます）</span>
             <div className="grid grid-cols-2 gap-2">
@@ -2709,6 +3202,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
               const totalMembers = (group.members || []).filter(id => !viewerIds.includes(id)).length;
               const totalViewers = viewerIds.length;
               const isViewer = viewerIds.includes(user.id);
+              const practiceCount = (group.practices || []).filter(p => p.date >= getLocalYMD(new Date())).length;
 
               return (
                 <div key={group.id} onClick={() => setActiveGroup(group)} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer hover:border-indigo-300 transition-all active:scale-[0.98]">
@@ -2724,6 +3218,11 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                         ) : (
                           <span className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full font-bold">
                             メンバー
+                          </span>
+                        )}
+                        {practiceCount > 0 && (
+                          <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">
+                            練習予定 {practiceCount}件
                           </span>
                         )}
                       </div>
@@ -2768,9 +3267,23 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
   const [bandError, setBandError] = useState('');
   const [isUpdatingBands, setIsUpdatingBands] = useState(false);
 
+  // 参加中グループの練習予定取得用ステート
+  const [myJoinedGroups, setMyJoinedGroups] = useState([]);
+  const [showPastPractices, setShowPastPractices] = useState(false);
+
   // 自身のアカウント削除確認モーダル用ステート
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+
+  useEffect(() => {
+    if (!db || !user) return;
+    const fetchMyGroups = async () => {
+      const q = query(collection(db, "groups"), where("members", "array-contains", user.id));
+      const snap = await getDocs(q);
+      setMyJoinedGroups(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    };
+    fetchMyGroups();
+  }, [user]);
 
   const saveUserToLocalStorage = (updatedUser) => {
     const storedAuth = localStorage.getItem('wpb_bandsync_auth');
@@ -2782,6 +3295,19 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
       } catch (e) {
         console.warn("Storage update error", e);
       }
+    }
+  };
+
+  const handleDeletePersonalPracticeFromProfile = async (dateStr, periodStr) => {
+    try {
+      const currentList = Array.isArray(user.personalPractices) ? user.personalPractices : [];
+      const updatedList = currentList.filter(p => !(p.date === dateStr && p.period === periodStr));
+      await updateDoc(doc(db, "users", user.id), { personalPractices: updatedList });
+      const updatedUser = { ...user, personalPractices: updatedList };
+      setUser(updatedUser);
+      saveUserToLocalStorage(updatedUser);
+    } catch (e) {
+      alert("個人練習の削除に失敗しました: " + e.message);
     }
   };
 
@@ -2952,6 +3478,12 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
     yearOptions.unshift(user.year);
   }
 
+  const todayYMD = getLocalYMD(new Date());
+  const allMyPractices = collectUserAllPractices(user, myJoinedGroups);
+  const displayedPractices = showPastPractices
+    ? allMyPractices
+    : allMyPractices.filter(p => p.date >= todayYMD);
+
   return (
     <div className="p-4 space-y-4">
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center relative overflow-hidden">
@@ -3036,6 +3568,84 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
             ))}
           </div>
         </div>
+      </div>
+
+      {/* プロフィール内：練習予定一覧（バンド練習 ＋ 個人練習） */}
+      <div className="bg-white p-5 rounded-3xl shadow-sm border border-indigo-100 space-y-3">
+        <div className="flex items-center justify-between border-b border-gray-100 pb-2.5">
+          <div className="flex items-center gap-2">
+            <CalendarIcon size={18} className="text-indigo-600" />
+            <h3 className="font-bold text-gray-800 text-sm">
+              練習予定一覧 ({displayedPractices.length}件)
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowPastPractices(!showPastPractices)}
+            className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-xl hover:bg-indigo-100 transition-colors"
+          >
+            {showPastPractices ? '今日以降のみ表示' : '過去の予定も表示'}
+          </button>
+        </div>
+
+        {displayedPractices.length === 0 ? (
+          <div className="text-center py-5 bg-gray-50 rounded-2xl border border-dashed border-gray-200 space-y-1">
+            <p className="text-xs text-gray-500 font-medium">予定されている練習はありません</p>
+            <p className="text-[10px] text-gray-400">
+              バンドグループのカレンダーで決定した練習や、マイ予定で登録した個人練習がここに表示されます
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {displayedPractices.map(pr => (
+              <div
+                key={pr.key}
+                className={`p-3 rounded-2xl border flex items-center justify-between gap-2 ${
+                  pr.type === 'personal'
+                    ? 'bg-purple-50/60 border-purple-200'
+                    : 'bg-indigo-50/60 border-indigo-200'
+                }`}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-bold text-xs text-gray-900">
+                      {formatYMDWithDay(pr.date)}
+                    </span>
+                    <span className="font-bold text-xs text-indigo-700 bg-white px-2 py-0.5 rounded-lg border border-gray-200">
+                      {formatPeriod(pr.period)}
+                    </span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border ${getStudioBadgeStyle(pr.studio)}`}>
+                      {pr.studio}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                      pr.type === 'personal'
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-indigo-600 text-white'
+                    }`}>
+                      {pr.type === 'personal' ? '個人練習' : 'バンド練習'}
+                    </span>
+                    <span className="text-xs font-bold text-gray-800 truncate">
+                      {pr.title}
+                    </span>
+                  </div>
+                </div>
+
+                {pr.type === 'personal' && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePersonalPracticeFromProfile(pr.date, pr.period)}
+                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-white rounded-xl transition-colors shrink-0"
+                    title="この個人練習を削除"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ログインID ＆ パスワードの表示・変更セクション */}
@@ -3448,6 +4058,7 @@ function AdminView() {
             {filteredUsers.map(u => {
               const joinedGroups = getUserJoinedGroups(u.id);
               const profileBands = u.bands || [];
+              const userPractices = collectUserAllPractices(u, groups).filter(p => p.date >= getLocalYMD(new Date()));
 
               return (
                 <div key={u.id} className="bg-white p-4 rounded-2xl border border-gray-200 space-y-3 shadow-xs">
@@ -3545,6 +4156,27 @@ function AdminView() {
                       </div>
                     </div>
                   )}
+
+                  {/* 練習予定（バンド練習・個人練習） */}
+                  {userPractices.length > 0 && (
+                    <div className="pt-2 border-t border-gray-100">
+                      <span className="block text-[10px] font-bold text-indigo-600 mb-1.5">
+                        直近の練習予定 ({userPractices.length}件)
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {userPractices.map(pr => (
+                          <span
+                            key={pr.key}
+                            className="inline-flex items-center gap-1 bg-indigo-50/70 border border-indigo-200 rounded-lg px-2 py-0.5 text-[10px] font-bold text-gray-800"
+                          >
+                            <span>{formatYMDWithDay(pr.date)} {formatPeriod(pr.period)}</span>
+                            <span className="text-indigo-700">[{pr.title}]</span>
+                            <span className={`px-1 rounded text-[9px] ${getStudioBadgeStyle(pr.studio)}`}>{pr.studio}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -3578,6 +4210,7 @@ function AdminView() {
               const viewerIds = g.viewers || [];
               const playingMembers = allParticipants.filter(m => !viewerIds.includes(m.id));
               const viewingMembers = allParticipants.filter(m => viewerIds.includes(m.id));
+              const groupPractices = (g.practices || []).filter(p => p.date >= getLocalYMD(new Date()));
 
               return (
                 <div key={g.id} className="bg-white p-4 rounded-2xl border border-gray-200 space-y-2.5 shadow-xs">
@@ -3633,6 +4266,30 @@ function AdminView() {
                             </span>
                           ))}
                         </div>
+                      </div>
+                    )}
+
+                    {groupPractices.length > 0 && (
+                      <div className="pt-1.5 border-t border-gray-200/70">
+                        <span className="block text-[10px] font-bold text-indigo-600 mb-1">決定済みのバンド練習 ({groupPractices.length}件)</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {groupPractices.map((gp, idx) => (
+                            <span
+                              key={idx}
+                              className="bg-white border border-indigo-200 text-indigo-900 text-[10px] font-bold px-2 py-0.5 rounded-lg inline-flex items-center gap-1"
+                            >
+                              <span>{formatYMDWithDay(gp.date)} {formatPeriod(gp.period)}</span>
+                              <span className={`px-1 rounded text-[9px] ${getStudioBadgeStyle(gp.studio)}`}>{gp.studio}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {g.memo && (
+                      <div className="pt-1.5 border-t border-gray-200/70">
+                        <span className="block text-[10px] font-bold text-amber-700 mb-0.5">共有メモ</span>
+                        <p className="text-[11px] text-gray-700 whitespace-pre-wrap">{g.memo}</p>
                       </div>
                     )}
                   </div>
