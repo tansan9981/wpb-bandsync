@@ -182,9 +182,9 @@ function TutorialModal({ onClose }) {
               <div className="w-16 h-16 bg-emerald-100 text-emerald-500 rounded-2xl flex items-center justify-center mx-auto mb-2">
                 <Check size={32} strokeWidth={3} />
               </div>
-              <h3 className="text-lg font-bold text-gray-900">5. 空き日が一目でわかる！</h3>
+              <h3 className="text-lg font-bold text-gray-900">5. 特定のメンバーとも予定を合わせられる！</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                グループ画面の「カレンダー」や「空き日一覧」では、メンバーの所属バンドを上部パネルで確認しながら空き日をチェックできます！
+                グループ画面の「カレンダー」や「空き日一覧」では、<strong>メンバーごとのON/OFFフィルター</strong>を使って特定のメンバー同士だけの空き日も簡単に探せます！
               </p>
             </div>
           )}
@@ -1096,7 +1096,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [showJoin, setShowJoin] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [joinCode, setJoinCode] = useState('');
-  const [joinAsViewer, setJoinAsViewer] = useState(false); // 閲覧者として参加するかどうか
+  const [joinAsViewer, setJoinAsViewer] = useState(false);
   
   const [isEditingGroupName, setIsEditingGroupName] = useState(false);
   const [editingGroupName, setEditingGroupName] = useState('');
@@ -1106,9 +1106,9 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [isDeletingGroup, setIsDeletingGroup] = useState(false);
   const [showLeaveGroupModal, setShowLeaveGroupModal] = useState(false);
   const [isLeavingGroup, setIsLeavingGroup] = useState(false);
-  const [memberToRemove, setMemberToRemove] = useState(null); // グループ作成者がメンバーを退出させる対象
+  const [memberToRemove, setMemberToRemove] = useState(null);
   const [isRemovingMember, setIsRemovingMember] = useState(false);
-  const [showRoleSwitchModal, setShowRoleSwitchModal] = useState(false); // メンバー⇄閲覧者の切り替え確認
+  const [showRoleSwitchModal, setShowRoleSwitchModal] = useState(false);
   const [isSwitchingRole, setIsSwitchingRole] = useState(false);
 
   const [groupMembers, setGroupMembers] = useState([]);
@@ -1117,6 +1117,10 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [listFilter, setListFilter] = useState('all'); 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
+
+  // 特定のメンバーだけで予定を合わせるためのメンバーフィルター（ON / OFF）用ステート
+  const [showMemberFilterPanel, setShowMemberFilterPanel] = useState(true);
+  const [excludedMemberIds, setExcludedMemberIds] = useState([]);
 
   // カレンダー＆空き日一覧で共有する「所属バンド表示パネル」用ステート
   const [showBandPanel, setShowBandPanel] = useState(true);
@@ -1135,6 +1139,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   }, [user]);
 
   useEffect(() => {
+    setExcludedMemberIds([]);
     if (activeGroup && db) {
       const fetchDetails = async () => {
         const snapM = await getDocs(collection(db, "users"));
@@ -1149,7 +1154,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       };
       fetchDetails();
     }
-  }, [activeGroup, user]);
+  }, [activeGroup?.id, user]);
 
   // 指定したユーザーがそのグループの閲覧者かどうか判定
   const isViewerInGroup = (groupObj, targetUserId) => {
@@ -1306,6 +1311,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       setActiveGroup(updatedGroup);
       setGroups(groups.map(g => g.id === activeGroup.id ? updatedGroup : g));
       setGroupMembers(groupMembers.filter(m => m.id !== targetId || m.username === 'Boss'));
+      setExcludedMemberIds(prev => prev.filter(id => id !== targetId));
       setMemberToRemove(null);
     } catch (e) {
       alert("メンバーの削除に失敗しました: " + e.message);
@@ -1350,10 +1356,15 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     return null;
   };
 
-  // スケジュールが反映される「通常メンバー」のみを取得（Bossと閲覧者を除外）
+  // スケジュールが反映される「通常メンバー全員」を取得（Bossと閲覧者を除外）
   const getActivePlayingMembers = () => {
     const viewerIds = activeGroup?.viewers || [];
     return groupMembers.filter(m => m.username !== 'Boss' && !viewerIds.includes(m.id));
+  };
+
+  // メンバーフィルターで「ON」になっている対象メンバーのみを取得
+  const getTargetPlayingMembers = () => {
+    return getActivePlayingMembers().filter(m => !excludedMemberIds.includes(m.id));
   };
 
   // 閲覧者のみを取得
@@ -1362,9 +1373,16 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     return groupMembers.filter(m => m.username !== 'Boss' && viewerIds.includes(m.id));
   };
 
+  // メンバーフィルターの個別ON/OFF切り替え
+  const toggleMemberFilter = (memberId) => {
+    setExcludedMemberIds(prev =>
+      prev.includes(memberId) ? prev.filter(id => id !== memberId) : [...prev, memberId]
+    );
+  };
+
   const getDayStatus = (date) => {
-    const activeMembers = getActivePlayingMembers();
-    if (activeMembers.length === 0) return { dayStatus: 'ng', detail: [] };
+    const targetMembers = getTargetPlayingMembers();
+    if (targetMembers.length === 0) return { dayStatus: 'ng', detail: [] };
     const periods = getPeriodListForDate(date);
     const detail = [];
     let isAnyPeriodAllOK = false;
@@ -1388,8 +1406,8 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         }
       });
 
-      // 通常メンバーの予定のみを集計（閲覧者は除外）
-      activeMembers.forEach(m => {
+      // ONになっている対象メンバーの予定のみを集計
+      targetMembers.forEach(m => {
         const rule = getUserScheduleRule(m.id, date, p);
         if (rule) {
           if (rule.status === 'ok') okMembers.push(m);
@@ -1400,7 +1418,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
       detail.push({ period: p, xMembers, triangleMembers, okMembers, bossNotice });
       
-      const actualMembersCount = activeMembers.length;
+      const actualMembersCount = targetMembers.length;
       const isAllOkPeriod = xMembers.length === 0 && triangleMembers.length === 0 && actualMembersCount > 0;
       const isTriPeriod = xMembers.length === 0 && triangleMembers.length > 0 && actualMembersCount > 0;
 
@@ -1415,12 +1433,12 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     return { dayStatus, detail };
   };
 
-  // 通常メンバーの所属バンドを集約する関数（閲覧者は除外）
+  // 現在ONになっているメンバーの所属バンドを集約する関数
   const getAggregatedGroupBands = () => {
-    const pureMembers = getActivePlayingMembers();
+    const targetMembers = getTargetPlayingMembers();
     const bandMap = new Map();
 
-    pureMembers.forEach(member => {
+    targetMembers.forEach(member => {
       const bands = member.bands || [];
       bands.forEach(b => {
         if (!b || !b.name) return;
@@ -1451,8 +1469,12 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     );
   };
 
-  // カレンダー＆空き日一覧で共通利用する「スクロール追従・所属バンドパネル」
+  // カレンダー＆空き日一覧で共通利用する「スクロール追従：メンバー絞り込み＆所属バンドパネル」
   const renderStickyBandPanel = () => {
+    const allPlayingMembers = getActivePlayingMembers();
+    const targetPlayingMembers = getTargetPlayingMembers();
+    const isMemberFiltered = excludedMemberIds.length > 0;
+
     const allGroupBands = getAggregatedGroupBands();
     const categoryFilteredBands = selectedBandCategoryFilter === 'すべて'
       ? allGroupBands
@@ -1460,7 +1482,104 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     const visibleBands = categoryFilteredBands.filter(b => !hiddenBandKeys.includes(b.key));
 
     return (
-      <div className="sticky top-14 z-20 pt-2 pb-1 px-4 bg-gray-50/95 backdrop-blur-sm">
+      <div className="sticky top-14 z-20 pt-2 pb-1 px-4 bg-gray-50/95 backdrop-blur-sm space-y-2">
+        {/* 1. 予定を合わせるメンバー絞り込み（ON / OFF）パネル */}
+        <div className="bg-white rounded-2xl shadow-md border border-emerald-200 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <User size={15} className="text-emerald-600 shrink-0" />
+              <span className="text-xs font-bold text-gray-800 truncate">
+                予定を合わせるメンバー
+              </span>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border shrink-0 ${
+                isMemberFiltered
+                  ? 'bg-amber-50 text-amber-800 border-amber-300'
+                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+              }`}>
+                ON {targetPlayingMembers.length}/{allPlayingMembers.length}人
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowMemberFilterPanel(!showMemberFilterPanel)}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border transition-colors shrink-0 ${
+                showMemberFilterPanel
+                  ? 'bg-emerald-600 text-white border-emerald-700'
+                  : 'bg-gray-100 text-gray-600 border-gray-200'
+              }`}
+            >
+              <span>メンバー選択: {showMemberFilterPanel ? '開く' : '閉じる'}</span>
+              {showMemberFilterPanel ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+          </div>
+
+          {showMemberFilterPanel && (
+            <div className="space-y-2 pt-0.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-gray-500">
+                  タップして個人の予定反映をON/OFFできます
+                </span>
+                <div className="flex gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setExcludedMemberIds([])}
+                    className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold hover:bg-emerald-100"
+                  >
+                    全員ON
+                  </button>
+                  {allPlayingMembers.some(m => m.id === user.id) && (
+                    <button
+                      type="button"
+                      onClick={() => setExcludedMemberIds(allPlayingMembers.filter(m => m.id !== user.id).map(m => m.id))}
+                      className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold hover:bg-indigo-100"
+                    >
+                      自分のみON
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setExcludedMemberIds(allPlayingMembers.map(m => m.id))}
+                    className="px-2 py-0.5 rounded bg-gray-100 text-gray-600 border border-gray-200 text-[10px] font-bold hover:bg-gray-200"
+                  >
+                    全員OFF
+                  </button>
+                </div>
+              </div>
+
+              {allPlayingMembers.length === 0 ? (
+                <p className="text-[11px] text-gray-400 text-center py-1">メンバーがいません</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-0.5">
+                  {allPlayingMembers.map(m => {
+                    const isOn = !excludedMemberIds.includes(m.id);
+                    return (
+                      <button
+                        type="button"
+                        key={m.id}
+                        onClick={() => toggleMemberFilter(m.id)}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all ${
+                          isOn
+                            ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                            : 'bg-gray-100 text-gray-400 border-gray-200 opacity-70'
+                        }`}
+                      >
+                        <span className={`px-1 py-0.2 rounded text-[9px] font-bold ${
+                          isOn ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-500'
+                        }`}>
+                          {isOn ? 'ON' : 'OFF'}
+                        </span>
+                        <span>{m.displayName}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 2. メンバーの所属バンド確認＆表示ON/OFFパネル */}
         <div className="bg-white rounded-2xl shadow-md border border-indigo-100 p-3 space-y-2.5">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
@@ -1554,10 +1673,12 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                 </div>
               )}
 
-              <div className="max-h-32 overflow-y-auto pr-0.5">
+              <div className="max-h-28 overflow-y-auto pr-0.5">
                 {categoryFilteredBands.length === 0 ? (
                   <p className="text-[11px] text-gray-400 text-center py-2">
-                    「{selectedBandCategoryFilter}」に登録されているバンドはありません
+                    {targetPlayingMembers.length === 0
+                      ? 'メンバーが全員OFFになっています'
+                      : `「${selectedBandCategoryFilter}」に登録されているバンドはありません`}
                   </p>
                 ) : isManagingBandVisibility ? (
                   <div className="flex flex-wrap gap-1.5">
@@ -1638,6 +1759,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
     const amIViewer = isViewerInGroup(activeGroup, user.id);
     const activePlayingMembers = getActivePlayingMembers();
+    const targetPlayingMembers = getTargetPlayingMembers();
     const viewerMembers = getViewerMembers();
 
     const renderGroupCalendar = () => {
@@ -1678,6 +1800,21 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
       return (
         <div className="px-4 pt-2 pb-4">
+          {excludedMemberIds.length > 0 && (
+            <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between text-xs text-amber-900">
+              <span>
+                <strong>絞り込み中 ({targetPlayingMembers.length}人):</strong> {targetPlayingMembers.map(m => m.displayName).join(', ') || '対象なし'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setExcludedMemberIds([])}
+                className="text-[10px] font-bold text-amber-800 underline shrink-0 ml-2"
+              >
+                全員に戻す
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center justify-between mb-4 bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
             <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))} className="p-1 hover:bg-gray-100 rounded-lg"><ChevronLeft size={20} className="text-gray-600"/></button>
             <h2 className="text-lg font-bold text-gray-800">{currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月</h2>
@@ -1691,56 +1828,74 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     const renderGroupDayDetail = () => {
       if (!selectedDate) return null;
       const status = getDayStatus(selectedDate);
+      const actualMembersCount = targetPlayingMembers.length;
+
       return (
         <div className="p-4 bg-white border-t rounded-t-3xl shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-2">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-bold text-gray-800">
-              {selectedDate.getMonth() + 1}/{selectedDate.getDate()} の空き状況
-            </h3>
+            <div>
+              <h3 className="text-lg font-bold text-gray-800">
+                {selectedDate.getMonth() + 1}/{selectedDate.getDate()} の空き状況
+              </h3>
+              {excludedMemberIds.length > 0 && (
+                <p className="text-[11px] text-amber-700 font-bold">
+                  ※ONの{actualMembersCount}人（{targetPlayingMembers.map(m => m.displayName).join(', ')}）で計算中
+                </p>
+              )}
+            </div>
             <button onClick={() => setSelectedDate(null)} className="p-1 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><X size={16} /></button>
           </div>
-          <div className="space-y-2">
-            {status.detail.map((p) => {
-              const actualMembersCount = activePlayingMembers.length;
-              const isAllOK = p.xMembers.length === 0 && p.triangleMembers.length === 0 && actualMembersCount > 0;
-              const isTriangle = p.xMembers.length === 0 && p.triangleMembers.length > 0 && actualMembersCount > 0;
-              
-              let itemBg = 'bg-gray-50 border-gray-100';
-              let badgeBg = 'bg-gray-200 text-gray-700';
-              if (isAllOK) { itemBg = 'bg-emerald-50 border-emerald-200'; badgeBg = 'bg-emerald-200 text-emerald-800'; } 
-              else if (isTriangle) { itemBg = 'bg-amber-50 border-amber-200'; badgeBg = 'bg-amber-200 text-amber-800'; }
 
-              return (
-                <div key={p.period} className={`p-3 rounded-xl flex items-center gap-3 border ${itemBg}`}>
-                  <div className={`w-14 text-center font-bold text-xs py-1.5 rounded-lg shrink-0 ${badgeBg}`}>{formatPeriod(p.period)}</div>
-                  <div className="flex-1">
-                    {p.bossNotice && (
-                      <div className="text-xs font-bold text-gray-800 flex items-center gap-1 mb-1 bg-white/90 p-1.5 rounded-lg border border-gray-200 shadow-sm">
-                        <AlertTriangle size={14} className="shrink-0 text-amber-500" />
-                        <span>【{formatPeriod(p.period)}】管理者連絡: {p.bossNotice}</span>
-                      </div>
-                    )}
-                    {isAllOK ? (
-                      <div>
-                        <span className="text-sm font-bold text-emerald-600 flex items-center gap-1"><Check size={16} /> 全員空いています！</span>
-                        {p.okMembers.length > 0 && (
-                          <div className="text-[10px] text-blue-600 mt-1">
-                            <span className="font-bold">〇 臨時({p.okMembers.length}人):</span> {p.okMembers.map(m => m.displayName).join(', ')}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-gray-600 space-y-1">
-                        {p.xMembers.length > 0 && <div><span className="font-medium text-red-500">× ({p.xMembers.length}人)</span>: {p.xMembers.map(m => m.displayName).join(', ')}</div>}
-                        {p.triangleMembers.length > 0 && <div><span className="font-medium text-amber-600">△ ({p.triangleMembers.length}人)</span>: {p.triangleMembers.map(m => m.displayName).join(', ')}</div>}
-                        {p.okMembers.length > 0 && <div><span className="font-medium text-blue-600">〇 臨時({p.okMembers.length}人)</span>: {p.okMembers.map(m => m.displayName).join(', ')}</div>}
-                      </div>
-                    )}
+          {actualMembersCount === 0 ? (
+            <div className="p-6 text-center text-xs text-gray-500 bg-gray-50 rounded-2xl">
+              予定を合わせるメンバーが全員OFFになっています。上部パネルでメンバーをONにしてください。
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {status.detail.map((p) => {
+                const isAllOK = p.xMembers.length === 0 && p.triangleMembers.length === 0 && actualMembersCount > 0;
+                const isTriangle = p.xMembers.length === 0 && p.triangleMembers.length > 0 && actualMembersCount > 0;
+                
+                let itemBg = 'bg-gray-50 border-gray-100';
+                let badgeBg = 'bg-gray-200 text-gray-700';
+                if (isAllOK) { itemBg = 'bg-emerald-50 border-emerald-200'; badgeBg = 'bg-emerald-200 text-emerald-800'; } 
+                else if (isTriangle) { itemBg = 'bg-amber-50 border-amber-200'; badgeBg = 'bg-amber-200 text-amber-800'; }
+
+                return (
+                  <div key={p.period} className={`p-3 rounded-xl flex items-center gap-3 border ${itemBg}`}>
+                    <div className={`w-14 text-center font-bold text-xs py-1.5 rounded-lg shrink-0 ${badgeBg}`}>{formatPeriod(p.period)}</div>
+                    <div className="flex-1">
+                      {p.bossNotice && (
+                        <div className="text-xs font-bold text-gray-800 flex items-center gap-1 mb-1 bg-white/90 p-1.5 rounded-lg border border-gray-200 shadow-sm">
+                          <AlertTriangle size={14} className="shrink-0 text-amber-500" />
+                          <span>【{formatPeriod(p.period)}】管理者連絡: {p.bossNotice}</span>
+                        </div>
+                      )}
+                      {isAllOK ? (
+                        <div>
+                          <span className="text-sm font-bold text-emerald-600 flex items-center gap-1">
+                            <Check size={16} />
+                            {excludedMemberIds.length > 0 ? `選択中の${actualMembersCount}人全員空いています！` : '全員空いています！'}
+                          </span>
+                          {p.okMembers.length > 0 && (
+                            <div className="text-[10px] text-blue-600 mt-1">
+                              <span className="font-bold">〇 臨時({p.okMembers.length}人):</span> {p.okMembers.map(m => m.displayName).join(', ')}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-gray-600 space-y-1">
+                          {p.xMembers.length > 0 && <div><span className="font-medium text-red-500">× ({p.xMembers.length}人)</span>: {p.xMembers.map(m => m.displayName).join(', ')}</div>}
+                          {p.triangleMembers.length > 0 && <div><span className="font-medium text-amber-600">△ ({p.triangleMembers.length}人)</span>: {p.triangleMembers.map(m => m.displayName).join(', ')}</div>}
+                          {p.okMembers.length > 0 && <div><span className="font-medium text-blue-600">〇 臨時({p.okMembers.length}人)</span>: {p.okMembers.map(m => m.displayName).join(', ')}</div>}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       );
     };
@@ -1749,9 +1904,27 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       const today = new Date();
       const list = [];
       const allAvailableSummary = [];
-      const actualMembersCount = activePlayingMembers.length;
+      const actualMembersCount = targetPlayingMembers.length;
 
-      if (actualMembersCount === 0) return <div className="p-8 text-center text-gray-500">予定を反映するメンバーがいません（全員が閲覧者、またはメンバー0人です）。</div>;
+      if (activePlayingMembers.length === 0) {
+        return <div className="p-8 text-center text-gray-500">予定を反映するメンバーがいません（全員が閲覧者、またはメンバー0人です）。</div>;
+      }
+
+      if (actualMembersCount === 0) {
+        return (
+          <div className="p-8 text-center text-gray-500 bg-white m-4 rounded-2xl border border-gray-100 space-y-2">
+            <p className="text-sm font-bold text-gray-700">予定を合わせるメンバーが全員OFFになっています</p>
+            <p className="text-xs text-gray-500">上部の「予定を合わせるメンバー」から、予定を合わせたい人をONにしてください。</p>
+            <button
+              type="button"
+              onClick={() => setExcludedMemberIds([])}
+              className="mt-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-sm"
+            >
+              全員をONに戻す
+            </button>
+          </div>
+        );
+      }
 
       for (let i = 0; i < 60; i++) {
         const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
@@ -1776,8 +1949,8 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             }
           });
 
-          // 通常メンバーのスケジュールのみ計算（閲覧者は除外）
-          activePlayingMembers.forEach(m => {
+          // ONになっている対象メンバーのスケジュールのみ計算
+          targetPlayingMembers.forEach(m => {
             const rule = getUserScheduleRule(m.id, d, p);
             if (rule) {
               if (rule.status === 'ok') okMembers.push(m);
@@ -1824,6 +1997,21 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
       return (
         <div className="px-4 pt-2 pb-6 space-y-4">
+          {excludedMemberIds.length > 0 && (
+            <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between text-xs text-amber-900">
+              <span>
+                <strong>絞り込み中 ({targetPlayingMembers.length}人):</strong> {targetPlayingMembers.map(m => m.displayName).join(', ')}
+              </span>
+              <button
+                type="button"
+                onClick={() => setExcludedMemberIds([])}
+                className="text-[10px] font-bold text-amber-800 underline shrink-0 ml-2"
+              >
+                全員に戻す
+              </button>
+            </div>
+          )}
+
           {list.length === 0 ? (
             <div className="p-8 text-center text-gray-500 bg-white rounded-2xl border border-gray-100">
               直近60日で1人でも参加できる枠はありません。
@@ -1834,16 +2022,20 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                 <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-emerald-200">
                   <div className="flex items-center gap-1.5">
                     <Check size={18} className="text-emerald-600" strokeWidth={3} />
-                    <h3 className="font-bold text-emerald-950 text-sm">全員空いている日時まとめ（直近60日）</h3>
+                    <h3 className="font-bold text-emerald-950 text-sm">
+                      {excludedMemberIds.length > 0
+                        ? `選択した${actualMembersCount}人が空いている日時まとめ`
+                        : '全員空いている日時まとめ（直近60日）'}
+                    </h3>
                   </div>
-                  <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-bold">
+                  <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-bold shrink-0">
                     {allAvailableSummary.length}日該当
                   </span>
                 </div>
 
                 {allAvailableSummary.length === 0 ? (
                   <p className="text-xs text-emerald-800 py-2 text-center">
-                    直近60日間でメンバー全員が揃う枠（×が0人の枠）はまだありません。
+                    直近60日間で対象メンバー全員が揃う枠（×が0人の枠）はまだありません。
                   </p>
                 ) : (
                   <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
@@ -1887,8 +2079,8 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                   </div>
                 )}
                 <div className="mt-2.5 pt-2 border-t border-emerald-200/60 flex items-center gap-3 text-[10px] text-emerald-900">
-                  <span><strong>◎</strong>：全員が完全OK</span>
-                  <span><strong>〇</strong>：全員参加可（△メンバー含む）</span>
+                  <span><strong>◎</strong>：対象全員が完全OK</span>
+                  <span><strong>〇</strong>：対象全員参加可（△含む）</span>
                 </div>
               </div>
 
@@ -1915,8 +2107,8 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
               <div className="bg-white p-3 rounded-xl shadow-sm border text-xs space-y-1.5">
                 <div className="font-bold text-gray-700 mb-2 border-b pb-1">状況の見方</div>
-                <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">◎ 全員参加</span> 全員が「〇」の枠</div>
-                <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">〇 全員OK</span> 全員参加できるが「△」を含む</div>
+                <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">◎ 全員参加</span> 対象全員が「〇」の枠</div>
+                <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">〇 全員OK</span> 対象全員参加できるが「△」を含む</div>
                 <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-bold">△ 一部NG</span> 欠席者がいるが、参加者は全員「〇」</div>
                 <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-red-100 text-red-700 font-bold">▲ 要調整</span> 欠席者がおり、参加者にも「△」を含む</div>
               </div>
@@ -2206,7 +2398,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             <button onClick={() => setGroupViewTab('members')} className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${groupViewTab === 'members' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>メンバー</button>
         </div>
 
-        {/* カレンダーと空き日一覧の両方で上部固定の所属バンドパネルを表示 */}
+        {/* カレンダーと空き日一覧の両方で上部固定の「メンバー絞り込み＆所属バンドパネル」を表示 */}
         {(groupViewTab === 'calendar' || groupViewTab === 'list') && renderStickyBandPanel()}
 
         {groupViewTab === 'calendar' && <>{renderGroupCalendar()}{renderGroupDayDetail()}</>}
