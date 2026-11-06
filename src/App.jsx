@@ -171,7 +171,8 @@ function TutorialModal({ onClose }) {
               </div>
               <h3 className="text-lg font-bold text-gray-900">4. グループに参加しよう</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                「グループ」タブから、自分が所属するバンドのグループを<strong>「新規作成」</strong>するか、リーダーから教わった<strong>6桁の参加コード</strong>を入力してグループに参加します。
+                「グループ」タブから、バンドのグループを<strong>「新規作成」</strong>するか、<strong>6桁の参加コード</strong>を入力して参加します。<br/><br/>
+                予定を反映させずに見るだけの<strong>「閲覧者」</strong>としても参加できます！
               </p>
             </div>
           )}
@@ -225,6 +226,26 @@ export default function App() {
 
   const [activeGroup, setActiveGroup] = useState(null);
   const [showTutorial, setShowTutorial] = useState(false);
+
+  // ブラウザの自動翻訳を完全に無効化
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = 'ja';
+      document.documentElement.setAttribute('translate', 'no');
+      document.documentElement.classList.add('notranslate');
+      if (document.body) {
+        document.body.setAttribute('translate', 'no');
+        document.body.classList.add('notranslate');
+      }
+      let meta = document.querySelector('meta[name="google"]');
+      if (!meta) {
+        meta = document.createElement('meta');
+        meta.name = 'google';
+        document.head.appendChild(meta);
+      }
+      meta.content = 'notranslate';
+    }
+  }, []);
 
   useEffect(() => {
     const storedAuth = localStorage.getItem('wpb_bandsync_auth');
@@ -311,7 +332,7 @@ export default function App() {
   if (!user) {
     const yearOptions = getYearOptions();
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div translate="no" className="notranslate min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8">
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-gray-900 tracking-tight">WPB BandSync</h1>
@@ -378,7 +399,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
+    <div translate="no" className="notranslate min-h-screen bg-gray-50 flex flex-col font-sans">
       <header className="bg-white shadow-sm border-b border-gray-100 z-30 sticky top-0">
         <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
           <h1 className="text-lg font-bold text-indigo-900">WPB BandSync</h1>
@@ -1075,13 +1096,20 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   const [showJoin, setShowJoin] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [joinCode, setJoinCode] = useState('');
+  const [joinAsViewer, setJoinAsViewer] = useState(false); // 閲覧者として参加するかどうか
   
   const [isEditingGroupName, setIsEditingGroupName] = useState(false);
   const [editingGroupName, setEditingGroupName] = useState('');
 
-  // バンドグループ削除確認モーダル用ステート
+  // 各種ワンクッション確認モーダル用ステート
   const [showDeleteGroupModal, setShowDeleteGroupModal] = useState(false);
   const [isDeletingGroup, setIsDeletingGroup] = useState(false);
+  const [showLeaveGroupModal, setShowLeaveGroupModal] = useState(false);
+  const [isLeavingGroup, setIsLeavingGroup] = useState(false);
+  const [memberToRemove, setMemberToRemove] = useState(null); // グループ作成者がメンバーを退出させる対象
+  const [isRemovingMember, setIsRemovingMember] = useState(false);
+  const [showRoleSwitchModal, setShowRoleSwitchModal] = useState(false); // メンバー⇄閲覧者の切り替え確認
+  const [isSwitchingRole, setIsSwitchingRole] = useState(false);
 
   const [groupMembers, setGroupMembers] = useState([]);
   const [allSchedules, setAllSchedules] = useState([]);
@@ -1111,7 +1139,9 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       const fetchDetails = async () => {
         const snapM = await getDocs(collection(db, "users"));
         const allU = snapM.docs.map(d => ({ id: d.id, ...d.data() }));
-        setGroupMembers(allU.filter(u => activeGroup.members.includes(u.id) || u.username === 'Boss'));
+        const memberIds = activeGroup.members || [];
+        const viewerIds = activeGroup.viewers || [];
+        setGroupMembers(allU.filter(u => memberIds.includes(u.id) || viewerIds.includes(u.id) || u.username === 'Boss'));
         
         const snapS = await getDocs(collection(db, "schedules"));
         const allS = snapS.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -1121,6 +1151,12 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     }
   }, [activeGroup, user]);
 
+  // 指定したユーザーがそのグループの閲覧者かどうか判定
+  const isViewerInGroup = (groupObj, targetUserId) => {
+    if (!groupObj || !Array.isArray(groupObj.viewers)) return false;
+    return groupObj.viewers.includes(targetUserId);
+  };
+
   const handleCreateGroup = async () => {
     if (!newGroupName.trim()) return;
     try {
@@ -1128,6 +1164,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         name: newGroupName.trim(),
         joinCode: generateJoinCode(),
         members: [user.id],
+        viewers: [],
         createdBy: user.id,
         createdAt: new Date().toISOString()
       };
@@ -1146,15 +1183,38 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       if (!snap.empty) {
         const groupDoc = snap.docs[0];
         const groupData = groupDoc.data();
-        if (!groupData.members.includes(user.id)) {
-          const newMembers = [...groupData.members, user.id];
-          await updateDoc(doc(db, "groups", groupDoc.id), { members: newMembers });
-          setGroups([...groups, { id: groupDoc.id, ...groupData, members: newMembers }]);
+        const currentMembers = groupData.members || [];
+        const currentViewers = groupData.viewers || [];
+
+        const newMembers = currentMembers.includes(user.id)
+          ? currentMembers
+          : [...currentMembers, user.id];
+
+        let newViewers = [...currentViewers];
+        if (joinAsViewer) {
+          if (!newViewers.includes(user.id)) newViewers.push(user.id);
+        } else {
+          newViewers = newViewers.filter(id => id !== user.id);
         }
+
+        await updateDoc(doc(db, "groups", groupDoc.id), {
+          members: newMembers,
+          viewers: newViewers
+        });
+
+        const updatedGroupObj = { id: groupDoc.id, ...groupData, members: newMembers, viewers: newViewers };
+        const existsIdx = groups.findIndex(g => g.id === groupDoc.id);
+        if (existsIdx >= 0) {
+          setGroups(groups.map(g => g.id === groupDoc.id ? updatedGroupObj : g));
+        } else {
+          setGroups([...groups, updatedGroupObj]);
+        }
+
         setJoinCode('');
+        setJoinAsViewer(false);
         setShowJoin(false);
       } else { alert("無効な参加コードです"); }
-    } catch(e) { alert("参加エラー"); }
+    } catch(e) { alert("参加エラー: " + e.message); }
   };
 
   const handleUpdateGroupName = async () => {
@@ -1167,6 +1227,29 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       setIsEditingGroupName(false);
     } catch (e) {
       alert("グループ名の変更に失敗しました: " + e.message);
+    }
+  };
+
+  // 自分の参加モード（メンバー ⇄ 閲覧者）を切り替える処理
+  const handleConfirmSwitchMyRole = async () => {
+    if (!activeGroup || isSwitchingRole) return;
+    setIsSwitchingRole(true);
+    try {
+      const currentViewers = activeGroup.viewers || [];
+      const currentlyViewer = currentViewers.includes(user.id);
+      const newViewers = currentlyViewer
+        ? currentViewers.filter(id => id !== user.id)
+        : [...currentViewers, user.id];
+
+      await updateDoc(doc(db, "groups", activeGroup.id), { viewers: newViewers });
+      const updatedGroup = { ...activeGroup, viewers: newViewers };
+      setActiveGroup(updatedGroup);
+      setGroups(groups.map(g => g.id === activeGroup.id ? updatedGroup : g));
+      setShowRoleSwitchModal(false);
+    } catch (e) {
+      alert("参加モードの切り替えに失敗しました: " + e.message);
+    } finally {
+      setIsSwitchingRole(false);
     }
   };
 
@@ -1183,6 +1266,51 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       alert("グループの削除に失敗しました: " + e.message);
     } finally {
       setIsDeletingGroup(false);
+    }
+  };
+
+  // メンバー自身がグループから退出する処理
+  const handleConfirmLeaveGroup = async () => {
+    if (!activeGroup || isLeavingGroup) return;
+    setIsLeavingGroup(true);
+    try {
+      const newMembers = (activeGroup.members || []).filter(id => id !== user.id);
+      const newViewers = (activeGroup.viewers || []).filter(id => id !== user.id);
+      await updateDoc(doc(db, "groups", activeGroup.id), {
+        members: newMembers,
+        viewers: newViewers
+      });
+      setGroups(groups.filter(g => g.id !== activeGroup.id));
+      setShowLeaveGroupModal(false);
+      setActiveGroup(null);
+    } catch (e) {
+      alert("グループからの退出に失敗しました: " + e.message);
+    } finally {
+      setIsLeavingGroup(false);
+    }
+  };
+
+  // グループ作成者が指定メンバーを退出させる処理
+  const handleConfirmRemoveMember = async () => {
+    if (!activeGroup || !memberToRemove || isRemovingMember) return;
+    setIsRemovingMember(true);
+    try {
+      const targetId = memberToRemove.id;
+      const newMembers = (activeGroup.members || []).filter(id => id !== targetId);
+      const newViewers = (activeGroup.viewers || []).filter(id => id !== targetId);
+      await updateDoc(doc(db, "groups", activeGroup.id), {
+        members: newMembers,
+        viewers: newViewers
+      });
+      const updatedGroup = { ...activeGroup, members: newMembers, viewers: newViewers };
+      setActiveGroup(updatedGroup);
+      setGroups(groups.map(g => g.id === activeGroup.id ? updatedGroup : g));
+      setGroupMembers(groupMembers.filter(m => m.id !== targetId || m.username === 'Boss'));
+      setMemberToRemove(null);
+    } catch (e) {
+      alert("メンバーの削除に失敗しました: " + e.message);
+    } finally {
+      setIsRemovingMember(false);
     }
   };
 
@@ -1222,8 +1350,21 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     return null;
   };
 
+  // スケジュールが反映される「通常メンバー」のみを取得（Bossと閲覧者を除外）
+  const getActivePlayingMembers = () => {
+    const viewerIds = activeGroup?.viewers || [];
+    return groupMembers.filter(m => m.username !== 'Boss' && !viewerIds.includes(m.id));
+  };
+
+  // 閲覧者のみを取得
+  const getViewerMembers = () => {
+    const viewerIds = activeGroup?.viewers || [];
+    return groupMembers.filter(m => m.username !== 'Boss' && viewerIds.includes(m.id));
+  };
+
   const getDayStatus = (date) => {
-    if (groupMembers.length === 0) return { dayStatus: 'ng', detail: [] };
+    const activeMembers = getActivePlayingMembers();
+    if (activeMembers.length === 0) return { dayStatus: 'ng', detail: [] };
     const periods = getPeriodListForDate(date);
     const detail = [];
     let isAnyPeriodAllOK = false;
@@ -1235,26 +1376,31 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       const okMembers = [];
       let bossNotice = null; 
       
+      // 管理者連絡のチェック
       groupMembers.forEach(m => {
-        const rule = getUserScheduleRule(m.id, date, p);
-        if (rule) {
-          if (m.username === 'Boss') {
+        if (m.username === 'Boss') {
+          const rule = getUserScheduleRule(m.id, date, p);
+          if (rule) {
             if (rule.status === 'studio1') bossNotice = '1スタジオ使用不可';
             else if (rule.status === 'studio2') bossNotice = '2スタジオ使用不可';
             else if (rule.text) bossNotice = rule.text;
           }
+        }
+      });
 
-          if (m.username !== 'Boss') {
-            if (rule.status === 'ok') okMembers.push(m);
-            else if (rule.status === 'triangle') triangleMembers.push(m);
-            else if (rule.status === 'x') xMembers.push(m);
-          }
+      // 通常メンバーの予定のみを集計（閲覧者は除外）
+      activeMembers.forEach(m => {
+        const rule = getUserScheduleRule(m.id, date, p);
+        if (rule) {
+          if (rule.status === 'ok') okMembers.push(m);
+          else if (rule.status === 'triangle') triangleMembers.push(m);
+          else if (rule.status === 'x') xMembers.push(m);
         }
       });
 
       detail.push({ period: p, xMembers, triangleMembers, okMembers, bossNotice });
       
-      const actualMembersCount = groupMembers.filter(m => m.username !== 'Boss').length;
+      const actualMembersCount = activeMembers.length;
       const isAllOkPeriod = xMembers.length === 0 && triangleMembers.length === 0 && actualMembersCount > 0;
       const isTriPeriod = xMembers.length === 0 && triangleMembers.length > 0 && actualMembersCount > 0;
 
@@ -1269,9 +1415,9 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     return { dayStatus, detail };
   };
 
-  // グループメンバー全員の所属バンドを集約する関数
+  // 通常メンバーの所属バンドを集約する関数（閲覧者は除外）
   const getAggregatedGroupBands = () => {
-    const pureMembers = groupMembers.filter(m => m.username !== 'Boss');
+    const pureMembers = getActivePlayingMembers();
     const bandMap = new Map();
 
     pureMembers.forEach(member => {
@@ -1485,10 +1631,14 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
   };
 
   if (activeGroup) {
-    // グループ作成者かどうか判定（過去に作られたcreatedBy未設定グループは先頭メンバーを作成者とみなす）
+    // グループ作成者かどうか判定
     const isGroupCreator = activeGroup.createdBy
       ? activeGroup.createdBy === user.id
       : (Array.isArray(activeGroup.members) && activeGroup.members[0] === user.id) || user.username === 'Boss';
+
+    const amIViewer = isViewerInGroup(activeGroup, user.id);
+    const activePlayingMembers = getActivePlayingMembers();
+    const viewerMembers = getViewerMembers();
 
     const renderGroupCalendar = () => {
       const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
@@ -1551,7 +1701,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           </div>
           <div className="space-y-2">
             {status.detail.map((p) => {
-              const actualMembersCount = groupMembers.filter(m => m.username !== 'Boss').length;
+              const actualMembersCount = activePlayingMembers.length;
               const isAllOK = p.xMembers.length === 0 && p.triangleMembers.length === 0 && actualMembersCount > 0;
               const isTriangle = p.xMembers.length === 0 && p.triangleMembers.length > 0 && actualMembersCount > 0;
               
@@ -1599,9 +1749,9 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       const today = new Date();
       const list = [];
       const allAvailableSummary = [];
-      const actualMembersCount = groupMembers.filter(m => m.username !== 'Boss').length;
+      const actualMembersCount = activePlayingMembers.length;
 
-      if (actualMembersCount === 0) return <div className="p-8 text-center text-gray-500">メンバーがいません。</div>;
+      if (actualMembersCount === 0) return <div className="p-8 text-center text-gray-500">予定を反映するメンバーがいません（全員が閲覧者、またはメンバー0人です）。</div>;
 
       for (let i = 0; i < 60; i++) {
         const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
@@ -1616,19 +1766,23 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           let bossNotice = null;
           
           groupMembers.forEach(m => {
-            const rule = getUserScheduleRule(m.id, d, p);
-            if (rule) {
-              if (m.username === 'Boss') {
+            if (m.username === 'Boss') {
+              const rule = getUserScheduleRule(m.id, d, p);
+              if (rule) {
                 if (rule.status === 'studio1') bossNotice = '1スタジオ使用不可';
                 else if (rule.status === 'studio2') bossNotice = '2スタジオ使用不可';
                 else if (rule.text) bossNotice = rule.text;
               }
+            }
+          });
 
-              if (m.username !== 'Boss') {
-                if (rule.status === 'ok') okMembers.push(m);
-                else if (rule.status === 'triangle') triangleMembers.push(m);
-                else if (rule.status === 'x') xMembers.push(m);
-              }
+          // 通常メンバーのスケジュールのみ計算（閲覧者は除外）
+          activePlayingMembers.forEach(m => {
+            const rule = getUserScheduleRule(m.id, d, p);
+            if (rule) {
+              if (rule.status === 'ok') okMembers.push(m);
+              else if (rule.status === 'triangle') triangleMembers.push(m);
+              else if (rule.status === 'x') xMembers.push(m);
             }
           });
 
@@ -1835,57 +1989,125 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       );
     };
 
-    const renderMemberList = () => {
-      const pureMembers = groupMembers.filter(m => m.username !== 'Boss');
+    const renderMemberCard = (m, isViewerCard = false) => {
+      const isCreatorMember = activeGroup.createdBy
+        ? activeGroup.createdBy === m.id
+        : Array.isArray(activeGroup.members) && activeGroup.members[0] === m.id;
+
       return (
-        <div className="p-4 space-y-3">
-          <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
-            <span className="font-bold text-gray-800">メンバー一覧 ({pureMembers.length}人)</span>
+        <div key={m.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-start gap-4">
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl shadow-inner shrink-0 mt-0.5 ${
+            isViewerCard ? 'bg-gray-100 text-gray-600' : 'bg-indigo-50 text-indigo-600'
+          }`}>
+            {m.displayName.substring(0, 1)}
           </div>
-          {pureMembers.map(m => (
-            <div key={m.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-start gap-4">
-              <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl shadow-inner shrink-0 mt-0.5">
-                {m.displayName.substring(0, 1)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-baseline gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <h4 className="font-bold text-gray-900 truncate">{m.displayName}</h4>
                   <span className="text-[10px] text-gray-400">@{m.username}</span>
+                  {isCreatorMember && (
+                    <span className="text-[9px] bg-amber-100 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded-full font-bold">
+                      作成者
+                    </span>
+                  )}
+                  {isViewerCard && (
+                    <span className="text-[9px] bg-gray-100 text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5">
+                      <Eye size={10} /> 閲覧者（予定反映なし）
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs font-medium text-indigo-600 mt-0.5">
                   {formatYearWithGrade(m.year)}
                 </div>
-                
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {m.parts && m.parts.map(part => (
-                    <span key={part} className="bg-gray-100 text-gray-600 text-[10px] px-1.5 py-0.5 rounded-md font-medium">{part}</span>
-                  ))}
-                  {(!m.parts || m.parts.length === 0) && <span className="text-[10px] text-gray-400">パート未設定</span>}
-                </div>
-
-                <div className="mt-2.5 pt-2 border-t border-gray-100">
-                  <p className="text-[10px] font-bold text-gray-400 mb-1.5">所属バンド</p>
-                  {m.bands && m.bands.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {m.bands.map((band, bIdx) => (
-                        <div 
-                          key={band.id || bIdx} 
-                          className="inline-flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-[11px]"
-                        >
-                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${getBandCategoryBadgeStyle(band.category)}`}>
-                            {band.category}
-                          </span>
-                          <span className="font-bold text-gray-800">{band.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[10px] text-gray-400">未登録</p>
-                  )}
-                </div>
               </div>
+
+              {/* グループ作成者によるメンバー退出ボタン（自分以外） */}
+              {isGroupCreator && m.id !== user.id && (
+                <button
+                  type="button"
+                  onClick={() => setMemberToRemove(m)}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-xl text-[10px] font-bold transition-colors shrink-0"
+                  title="このメンバーをグループから退出させる"
+                >
+                  <Trash2 size={12} />
+                  <span>退出させる</span>
+                </button>
+              )}
             </div>
-          ))}
+            
+            <div className="flex flex-wrap gap-1 mt-2">
+              {m.parts && m.parts.map(part => (
+                <span key={part} className="bg-gray-100 text-gray-600 text-[10px] px-1.5 py-0.5 rounded-md font-medium">{part}</span>
+              ))}
+              {(!m.parts || m.parts.length === 0) && <span className="text-[10px] text-gray-400">パート未設定</span>}
+            </div>
+
+            <div className="mt-2.5 pt-2 border-t border-gray-100">
+              <p className="text-[10px] font-bold text-gray-400 mb-1.5">所属バンド</p>
+              {m.bands && m.bands.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {m.bands.map((band, bIdx) => (
+                    <div 
+                      key={band.id || bIdx} 
+                      className="inline-flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-[11px]"
+                    >
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${getBandCategoryBadgeStyle(band.category)}`}>
+                        {band.category}
+                      </span>
+                      <span className="font-bold text-gray-800">{band.name}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[10px] text-gray-400">未登録</p>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const renderMemberList = () => {
+      return (
+        <div className="p-4 space-y-4">
+          {/* 通常メンバー一覧 */}
+          <div className="space-y-3">
+            <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
+              <span className="font-bold text-gray-800 text-sm">バンドメンバー一覧 ({activePlayingMembers.length}人)</span>
+              <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-bold border border-emerald-200">
+                カレンダーに予定を反映
+              </span>
+            </div>
+            {activePlayingMembers.length === 0 ? (
+              <div className="p-6 text-center bg-white rounded-2xl border border-gray-100 text-xs text-gray-400">
+                メンバーがいません
+              </div>
+            ) : (
+              activePlayingMembers.map(m => renderMemberCard(m, false))
+            )}
+          </div>
+
+          {/* 閲覧者一覧 */}
+          <div className="space-y-3 pt-2">
+            <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Eye size={16} className="text-gray-500" />
+                <span className="font-bold text-gray-800 text-sm">閲覧者一覧 ({viewerMembers.length}人)</span>
+              </div>
+              <span className="text-[10px] text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full font-bold border border-gray-200">
+                予定に影響しない閲覧専用
+              </span>
+            </div>
+            {viewerMembers.length === 0 ? (
+              <div className="p-4 text-center bg-white rounded-2xl border border-dashed border-gray-200 text-xs text-gray-400">
+                現在、閲覧者として参加している人はいません
+              </div>
+            ) : (
+              viewerMembers.map(m => renderMemberCard(m, true))
+            )}
+          </div>
         </div>
       );
     };
@@ -1920,23 +2142,60 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                   </button>
                 </div>
 
-                {/* グループ作成者（またはBoss）のみグループ削除ボタンを表示 */}
-                {isGroupCreator && (
-                  <button
-                    type="button"
-                    onClick={() => setShowDeleteGroupModal(true)}
-                    className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-xl text-[11px] font-bold transition-colors shrink-0"
-                    title="このバンドグループを削除"
-                  >
-                    <Trash2 size={13} />
-                    <span>グループ削除</span>
-                  </button>
-                )}
+                {/* 右上アクションボタン：自分の退出 ＆ 作成者のグループ削除 */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {user.username !== 'Boss' && (
+                    <button
+                      type="button"
+                      onClick={() => setShowLeaveGroupModal(true)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200 rounded-xl text-[11px] font-bold transition-colors"
+                      title="このグループから退出する"
+                    >
+                      <LogOut size={12} />
+                      <span>グループ退出</span>
+                    </button>
+                  )}
+
+                  {isGroupCreator && (
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteGroupModal(true)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-xl text-[11px] font-bold transition-colors"
+                      title="このバンドグループを削除"
+                    >
+                      <Trash2 size={12} />
+                      <span>グループ削除</span>
+                    </button>
+                  )}
+                </div>
               </div>
             )}
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-xs text-gray-500">メンバー {groupMembers.filter(m => m.username !== 'Boss').length}人</span>
-              <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">コード: <strong className="font-mono tracking-widest">{activeGroup.joinCode}</strong></span>
+
+            <div className="flex items-center flex-wrap gap-2 mt-1.5">
+              <span className="text-xs text-gray-600 font-medium">
+                メンバー {activePlayingMembers.length}人
+                {viewerMembers.length > 0 && ` ・ 閲覧者 ${viewerMembers.length}人`}
+              </span>
+              <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                コード: <strong className="font-mono tracking-widest">{activeGroup.joinCode}</strong>
+              </span>
+
+              {/* 自分の現在の参加モード表示 ＆ 切替ボタン */}
+              {user.username !== 'Boss' && (
+                <button
+                  type="button"
+                  onClick={() => setShowRoleSwitchModal(true)}
+                  className={`text-[10px] px-2 py-0.5 rounded-full font-bold border flex items-center gap-1 transition-colors ${
+                    amIViewer
+                      ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                      : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                  }`}
+                  title="タップしてメンバー/閲覧者を切り替え"
+                >
+                  <Eye size={11} />
+                  <span>{amIViewer ? '閲覧者モード中 (切替)' : 'メンバー参加中 (切替)'}</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1954,7 +2213,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
         {groupViewTab === 'list' && renderAvailableList()}
         {groupViewTab === 'members' && renderMemberList()}
 
-        {/* バンドグループ削除の確認ポップアップ（ワンクッション） */}
+        {/* 1. バンドグループ削除の確認ポップアップ（ワンクッション） */}
         {showDeleteGroupModal && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
             <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-in zoom-in-95 duration-150">
@@ -1989,6 +2248,116 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
             </div>
           </div>
         )}
+
+        {/* 2. 自分自身がグループから退出する確認ポップアップ（ワンクッション） */}
+        {showLeaveGroupModal && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-in zoom-in-95 duration-150">
+              <div className="flex items-center gap-2 text-amber-600 mb-3">
+                <AlertTriangle size={22} className="shrink-0" />
+                <h4 className="font-bold text-base text-gray-900">グループ退出の確認</h4>
+              </div>
+              <p className="text-xs text-gray-700 leading-relaxed font-medium mb-2">
+                バンドグループ「<strong>{activeGroup.name}</strong>」から退出しますか？
+              </p>
+              <p className="text-[11px] text-gray-500 bg-gray-50 p-2.5 rounded-xl mb-5 border border-gray-200">
+                ※退出しても、後から再度6桁の参加コードを入力すればいつでも再参加できます。
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={isLeavingGroup}
+                  onClick={() => setShowLeaveGroupModal(false)}
+                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-200 transition-colors"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  disabled={isLeavingGroup}
+                  onClick={handleConfirmLeaveGroup}
+                  className="flex-1 py-2.5 bg-red-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-red-700 transition-colors disabled:opacity-50"
+                >
+                  {isLeavingGroup ? '退出中...' : '退出する'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 3. 作成者がメンバーを退出させる確認ポップアップ（ワンクッション） */}
+        {memberToRemove && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-in zoom-in-95 duration-150">
+              <div className="flex items-center gap-2 text-red-600 mb-3">
+                <AlertTriangle size={22} className="shrink-0" />
+                <h4 className="font-bold text-base text-gray-900">メンバー削除の確認</h4>
+              </div>
+              <p className="text-xs text-gray-700 leading-relaxed font-medium mb-2">
+                「<strong>{memberToRemove.displayName} (@{memberToRemove.username})</strong>」さんをこのグループから退出させますか？
+              </p>
+              <p className="text-[11px] text-gray-500 bg-gray-50 p-2.5 rounded-xl mb-5 border border-gray-200">
+                ※グループから除外され、カレンダーの空き状況計算からも外れます。
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={isRemovingMember}
+                  onClick={() => setMemberToRemove(null)}
+                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-200 transition-colors"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  disabled={isRemovingMember}
+                  onClick={handleConfirmRemoveMember}
+                  className="flex-1 py-2.5 bg-red-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-red-700 transition-colors disabled:opacity-50"
+                >
+                  {isRemovingMember ? '処理中...' : '退出させる'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 4. メンバー ⇄ 閲覧者モード切り替え確認ポップアップ */}
+        {showRoleSwitchModal && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-in zoom-in-95 duration-150">
+              <div className="flex items-center gap-2 text-indigo-600 mb-3">
+                <Eye size={22} className="shrink-0" />
+                <h4 className="font-bold text-base text-gray-900">参加モードの切り替え</h4>
+              </div>
+              <p className="text-xs text-gray-700 leading-relaxed font-medium mb-2">
+                このグループでのあなたの状態を「<strong>{amIViewer ? '通常メンバー（予定を反映する）' : '閲覧者（予定を反映しない）'}</strong>」に切り替えますか？
+              </p>
+              <p className="text-[11px] text-gray-500 bg-gray-50 p-2.5 rounded-xl mb-5 border border-gray-200">
+                {amIViewer
+                  ? '※通常メンバーになると、あなたのマイ予定がグループの空き日計算に反映されるようになります。'
+                  : '※閲覧者になると、あなたのマイ予定はグループのカレンダーや空き日計算に一切影響しなくなります。'}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={isSwitchingRole}
+                  onClick={() => setShowRoleSwitchModal(false)}
+                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-200 transition-colors"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  disabled={isSwitchingRole}
+                  onClick={handleConfirmSwitchMyRole}
+                  className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                >
+                  {isSwitchingRole ? '変更中...' : '切り替える'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -2012,12 +2381,62 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       )}
 
       {showJoin && (
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-indigo-100 animate-in fade-in zoom-in-95">
-          <h3 className="text-sm font-bold text-gray-800 mb-3">グループに参加</h3>
-          <input type="text" placeholder="6桁の参加コードを入力" className="w-full border border-gray-300 p-3 rounded-xl mb-3 text-sm font-mono uppercase focus:ring-2 focus:ring-indigo-500" maxLength={6} value={joinCode} onChange={e => setJoinCode(e.target.value)} />
-          <div className="flex gap-2">
-            <button onClick={handleJoinGroup} className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-medium">参加</button>
-            <button onClick={() => setShowJoin(false)} className="px-4 bg-gray-100 text-gray-600 py-2 rounded-xl text-sm font-medium">キャンセル</button>
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-indigo-100 animate-in fade-in zoom-in-95 space-y-3">
+          <h3 className="text-sm font-bold text-gray-800">グループに参加</h3>
+          <input
+            type="text"
+            placeholder="6桁の参加コードを入力"
+            className="w-full border border-gray-300 p-3 rounded-xl text-sm font-mono uppercase focus:ring-2 focus:ring-indigo-500"
+            maxLength={6}
+            value={joinCode}
+            onChange={e => setJoinCode(e.target.value)}
+          />
+
+          {/* 参加方法（メンバー or 閲覧者）の選択 */}
+          <div>
+            <span className="block text-[11px] font-bold text-gray-700 mb-1.5">参加方法を選択</span>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setJoinAsViewer(false)}
+                className={`p-2.5 rounded-xl border text-left transition-all ${
+                  !joinAsViewer
+                    ? 'bg-indigo-50 border-indigo-500 text-indigo-900 ring-1 ring-indigo-500'
+                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <div className="font-bold text-xs flex items-center gap-1">
+                  <Users size={13} className={!joinAsViewer ? 'text-indigo-600' : 'text-gray-400'} />
+                  <span>メンバーとして参加</span>
+                </div>
+                <p className="text-[10px] opacity-80 mt-0.5">自分の予定をカレンダーに反映します</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setJoinAsViewer(true)}
+                className={`p-2.5 rounded-xl border text-left transition-all ${
+                  joinAsViewer
+                    ? 'bg-amber-50 border-amber-500 text-amber-900 ring-1 ring-amber-500'
+                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <div className="font-bold text-xs flex items-center gap-1">
+                  <Eye size={13} className={joinAsViewer ? 'text-amber-600' : 'text-gray-400'} />
+                  <span>閲覧者として参加</span>
+                </div>
+                <p className="text-[10px] opacity-80 mt-0.5">予定に影響を与えず閲覧のみ行います</p>
+              </button>
+            </div>
+          </div>
+
+          <div className="flex gap-2 pt-1">
+            <button onClick={handleJoinGroup} className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl text-sm font-bold shadow-sm">
+              {joinAsViewer ? '閲覧者として参加' : 'メンバーとして参加'}
+            </button>
+            <button onClick={() => setShowJoin(false)} className="px-4 bg-gray-100 text-gray-600 py-2.5 rounded-xl text-sm font-medium">
+              キャンセル
+            </button>
           </div>
         </div>
       )}
@@ -2028,15 +2447,34 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-gray-200"><p className="text-gray-400 text-sm">グループに所属していません</p></div>
         ) : (
           <div className="space-y-3">
-            {groups.map(group => (
-              <div key={group.id} onClick={() => setActiveGroup(group)} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer hover:border-indigo-300 transition-all active:scale-[0.98]">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl shadow-inner">{group.name.substring(0, 1)}</div>
-                  <div><h4 className="font-bold text-gray-900">{group.name}</h4><p className="text-xs text-gray-500 mt-0.5">{group.members.length}人のメンバー</p></div>
+            {groups.map(group => {
+              const viewerIds = group.viewers || [];
+              const totalMembers = (group.members || []).filter(id => !viewerIds.includes(id)).length;
+              const totalViewers = viewerIds.length;
+              const isViewer = viewerIds.includes(user.id);
+
+              return (
+                <div key={group.id} onClick={() => setActiveGroup(group)} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer hover:border-indigo-300 transition-all active:scale-[0.98]">
+                  <div className="flex items-center gap-4 min-w-0">
+                    <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl shadow-inner shrink-0">{group.name.substring(0, 1)}</div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="font-bold text-gray-900 truncate">{group.name}</h4>
+                        {isViewer && (
+                          <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full font-bold flex items-center gap-0.5">
+                            <Eye size={10} /> 閲覧者
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        メンバー {totalMembers}人{totalViewers > 0 ? ` ・ 閲覧者 ${totalViewers}人` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="text-gray-300 shrink-0" size={20} />
                 </div>
-                <ChevronRight className="text-gray-300" size={20} />
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -2219,23 +2657,24 @@ function ProfileView({ user, setUser, setShowTutorial, handleLogout }) {
     if (isDeletingAccount) return;
     setIsDeletingAccount(true);
     try {
-      // 1. 自分のスケジュールデータをすべて削除
       const schedQ = query(collection(db, "schedules"), where("userId", "==", user.id));
       const schedSnap = await getDocs(schedQ);
       for (const sDoc of schedSnap.docs) {
         await deleteDoc(doc(db, "schedules", sDoc.id));
       }
 
-      // 2. 参加しているグループのmembers配列から自分のIDを除外
       const groupQ = query(collection(db, "groups"), where("members", "array-contains", user.id));
       const groupSnap = await getDocs(groupQ);
       for (const gDoc of groupSnap.docs) {
         const gData = gDoc.data();
         const updatedMembers = (gData.members || []).filter(mId => mId !== user.id);
-        await updateDoc(doc(db, "groups", gDoc.id), { members: updatedMembers });
+        const updatedViewers = (gData.viewers || []).filter(mId => mId !== user.id);
+        await updateDoc(doc(db, "groups", gDoc.id), {
+          members: updatedMembers,
+          viewers: updatedViewers
+        });
       }
 
-      // 3. ユーザー自身のドキュメントを削除
       await deleteDoc(doc(db, "users", user.id));
 
       setShowDeleteAccountModal(false);
@@ -2618,7 +3057,7 @@ function AdminView() {
   const [isGroupListOpen, setIsGroupListOpen] = useState(true);
 
   // Boss用：ユーザー・グループ削除確認モーダル用ステート
-  const [deleteTarget, setDeleteTarget] = useState(null); // { type: 'user' | 'group', id, name }
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
@@ -2638,25 +3077,23 @@ function AdminView() {
     try {
       if (deleteTarget.type === 'user') {
         const targetUserId = deleteTarget.id;
-        // スケジュール削除
         const schedQ = query(collection(db, "schedules"), where("userId", "==", targetUserId));
         const schedSnap = await getDocs(schedQ);
         for (const sDoc of schedSnap.docs) {
           await deleteDoc(doc(db, "schedules", sDoc.id));
         }
-        // 参加グループから除外
         const updatedGroups = [];
         for (const g of groups) {
           if (Array.isArray(g.members) && g.members.includes(targetUserId)) {
             const newMembers = g.members.filter(mId => mId !== targetUserId);
-            await updateDoc(doc(db, "groups", g.id), { members: newMembers });
-            updatedGroups.push({ ...g, members: newMembers });
+            const newViewers = (g.viewers || []).filter(mId => mId !== targetUserId);
+            await updateDoc(doc(db, "groups", g.id), { members: newMembers, viewers: newViewers });
+            updatedGroups.push({ ...g, members: newMembers, viewers: newViewers });
           } else {
             updatedGroups.push(g);
           }
         }
         setGroups(updatedGroups);
-        // ユーザードキュメント削除
         await deleteDoc(doc(db, "users", targetUserId));
         setUsers(users.filter(u => u.id !== targetUserId));
       } else if (deleteTarget.type === 'group') {
@@ -2804,16 +3241,24 @@ function AdminView() {
                       <p className="text-[11px] text-gray-400">参加しているグループはありません</p>
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
-                        {joinedGroups.map(g => (
-                          <span
-                            key={g.id}
-                            className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 border border-indigo-200 px-2.5 py-1 rounded-lg text-[11px] font-bold"
-                          >
-                            <Users size={12} className="shrink-0 text-indigo-600" />
-                            <span>{g.name}</span>
-                            <span className="text-[9px] font-mono text-indigo-500 ml-0.5">({g.joinCode})</span>
-                          </span>
-                        ))}
+                        {joinedGroups.map(g => {
+                          const isViewer = Array.isArray(g.viewers) && g.viewers.includes(u.id);
+                          return (
+                            <span
+                              key={g.id}
+                              className={`inline-flex items-center gap-1 border px-2.5 py-1 rounded-lg text-[11px] font-bold ${
+                                isViewer
+                                  ? 'bg-gray-100 text-gray-700 border-gray-300'
+                                  : 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                              }`}
+                            >
+                              {isViewer ? <Eye size={12} className="shrink-0 text-gray-500" /> : <Users size={12} className="shrink-0 text-indigo-600" />}
+                              <span>{g.name}</span>
+                              {isViewer && <span className="text-[9px] bg-white px-1 rounded border border-gray-200">閲覧者</span>}
+                              <span className="text-[9px] font-mono opacity-75 ml-0.5">({g.joinCode})</span>
+                            </span>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -2868,14 +3313,19 @@ function AdminView() {
         {isGroupListOpen && (
           <div className="p-3 space-y-3 border-t border-gray-100">
             {filteredGroups.map(g => {
-              const memberUsers = getGroupMemberUsers(g);
+              const allParticipants = getGroupMemberUsers(g);
+              const viewerIds = g.viewers || [];
+              const playingMembers = allParticipants.filter(m => !viewerIds.includes(m.id));
+              const viewingMembers = allParticipants.filter(m => viewerIds.includes(m.id));
+
               return (
                 <div key={g.id} className="bg-white p-4 rounded-2xl border border-gray-200 space-y-2.5 shadow-xs">
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="font-bold text-sm text-gray-900">{g.name}</p>
                       <p className="text-[11px] text-gray-500 mt-0.5">
-                        参加コード: <strong className="font-mono text-gray-800">{g.joinCode}</strong> ・ メンバー {memberUsers.length}人
+                        参加コード: <strong className="font-mono text-gray-800">{g.joinCode}</strong> ・ メンバー {playingMembers.length}人
+                        {viewingMembers.length > 0 && ` ・ 閲覧者 ${viewingMembers.length}人`}
                       </p>
                     </div>
                     <button
@@ -2889,20 +3339,39 @@ function AdminView() {
                   </div>
 
                   {/* グループ所属メンバーの名前一覧 */}
-                  <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-100">
-                    <span className="block text-[10px] font-bold text-gray-400 mb-1">所属メンバー</span>
-                    {memberUsers.length === 0 ? (
-                      <p className="text-[11px] text-gray-400">メンバーがいません</p>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {memberUsers.map(m => (
-                          <span
-                            key={m.id}
-                            className="bg-white border border-gray-200 text-gray-800 text-[11px] font-bold px-2 py-0.5 rounded-lg"
-                          >
-                            {m.displayName} <span className="text-[9px] font-normal text-gray-400">(@{m.username})</span>
-                          </span>
-                        ))}
+                  <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-100 space-y-2">
+                    <div>
+                      <span className="block text-[10px] font-bold text-gray-400 mb-1">メンバー ({playingMembers.length}人)</span>
+                      {playingMembers.length === 0 ? (
+                        <p className="text-[11px] text-gray-400">メンバーがいません</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {playingMembers.map(m => (
+                            <span
+                              key={m.id}
+                              className="bg-white border border-gray-200 text-gray-800 text-[11px] font-bold px-2 py-0.5 rounded-lg"
+                            >
+                              {m.displayName} <span className="text-[9px] font-normal text-gray-400">(@{m.username})</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {viewingMembers.length > 0 && (
+                      <div className="pt-1.5 border-t border-gray-200/70">
+                        <span className="block text-[10px] font-bold text-gray-400 mb-1">閲覧者 ({viewingMembers.length}人)</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {viewingMembers.map(m => (
+                            <span
+                              key={m.id}
+                              className="bg-gray-100 border border-gray-200 text-gray-600 text-[11px] font-bold px-2 py-0.5 rounded-lg inline-flex items-center gap-1"
+                            >
+                              <Eye size={10} />
+                              {m.displayName} <span className="text-[9px] font-normal text-gray-400">(@{m.username})</span>
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
