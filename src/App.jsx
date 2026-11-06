@@ -169,10 +169,10 @@ function TutorialModal({ onClose }) {
               <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-2">
                 <Users size={32} />
               </div>
-              <h3 className="text-lg font-bold text-gray-900">4. グループに参加しよう</h3>
+              <h3 className="text-lg font-bold text-gray-900">4. グループ参加と閲覧者モード</h3>
               <p className="text-sm text-gray-600 leading-relaxed text-left">
-                「グループ」タブから、バンドのグループを<strong>「新規作成」</strong>するか、<strong>6桁の参加コード</strong>を入力して参加します。<br/><br/>
-                予定を反映させずに見るだけの<strong>「閲覧者」</strong>としても参加できます！
+                「グループ」タブから、バンドのグループを<strong>「新規作成」</strong>するか、<strong>6桁の参加コード</strong>で参加します。<br/><br/>
+                参加する時だけでなく、<strong>グループに入った後でも「メンバー ⇄ 閲覧者（予定に影響しない）」をいつでも切り替え</strong>られます！
               </p>
             </div>
           )}
@@ -1240,14 +1240,29 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
     if (!activeGroup || isSwitchingRole) return;
     setIsSwitchingRole(true);
     try {
+      const currentMembers = activeGroup.members || [];
       const currentViewers = activeGroup.viewers || [];
       const currentlyViewer = currentViewers.includes(user.id);
+
+      const ensuredMembers = currentMembers.includes(user.id)
+        ? currentMembers
+        : [...currentMembers, user.id];
+
       const newViewers = currentlyViewer
         ? currentViewers.filter(id => id !== user.id)
         : [...currentViewers, user.id];
 
-      await updateDoc(doc(db, "groups", activeGroup.id), { viewers: newViewers });
-      const updatedGroup = { ...activeGroup, viewers: newViewers };
+      await updateDoc(doc(db, "groups", activeGroup.id), {
+        members: ensuredMembers,
+        viewers: newViewers
+      });
+
+      // 閲覧者からメンバーに戻った際、メンバーフィルターでOFFになっていた場合はONに戻す
+      if (currentlyViewer) {
+        setExcludedMemberIds(prev => prev.filter(id => id !== user.id));
+      }
+
+      const updatedGroup = { ...activeGroup, members: ensuredMembers, viewers: newViewers };
       setActiveGroup(updatedGroup);
       setGroups(groups.map(g => g.id === activeGroup.id ? updatedGroup : g));
       setShowRoleSwitchModal(false);
@@ -2185,11 +2200,14 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
       const isCreatorMember = activeGroup.createdBy
         ? activeGroup.createdBy === m.id
         : Array.isArray(activeGroup.members) && activeGroup.members[0] === m.id;
+      const isMe = m.id === user.id;
 
       return (
-        <div key={m.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-start gap-4">
+        <div key={m.id} className={`bg-white p-4 rounded-2xl shadow-sm border flex items-start gap-4 ${
+          isMe ? 'border-indigo-300 ring-1 ring-indigo-100' : 'border-gray-100'
+        }`}>
           <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl shadow-inner shrink-0 mt-0.5 ${
-            isViewerCard ? 'bg-gray-100 text-gray-600' : 'bg-indigo-50 text-indigo-600'
+            isViewerCard ? 'bg-amber-50 text-amber-700' : 'bg-indigo-50 text-indigo-600'
           }`}>
             {m.displayName.substring(0, 1)}
           </div>
@@ -2199,13 +2217,18 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <h4 className="font-bold text-gray-900 truncate">{m.displayName}</h4>
                   <span className="text-[10px] text-gray-400">@{m.username}</span>
+                  {isMe && (
+                    <span className="text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded-full font-bold">
+                      あなた
+                    </span>
+                  )}
                   {isCreatorMember && (
                     <span className="text-[9px] bg-amber-100 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded-full font-bold">
                       作成者
                     </span>
                   )}
                   {isViewerCard && (
-                    <span className="text-[9px] bg-gray-100 text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5">
+                    <span className="text-[9px] bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5">
                       <Eye size={10} /> 閲覧者（予定反映なし）
                     </span>
                   )}
@@ -2215,18 +2238,36 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                 </div>
               </div>
 
-              {/* グループ作成者によるメンバー退出ボタン（自分以外） */}
-              {isGroupCreator && m.id !== user.id && (
-                <button
-                  type="button"
-                  onClick={() => setMemberToRemove(m)}
-                  className="flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-xl text-[10px] font-bold transition-colors shrink-0"
-                  title="このメンバーをグループから退出させる"
-                >
-                  <Trash2 size={12} />
-                  <span>退出させる</span>
-                </button>
-              )}
+              <div className="flex items-center gap-1 shrink-0">
+                {/* 自分自身のカードには「閲覧者に変更 / メンバーに戻る」ボタンを表示 */}
+                {isMe && user.username !== 'Boss' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRoleSwitchModal(true)}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-bold border transition-colors ${
+                      isViewerCard
+                        ? 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700 shadow-xs'
+                        : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                    }`}
+                  >
+                    {isViewerCard ? <Users size={11} /> : <Eye size={11} />}
+                    <span>{isViewerCard ? 'メンバーに戻る' : '閲覧者に変更'}</span>
+                  </button>
+                )}
+
+                {/* グループ作成者によるメンバー退出ボタン（自分以外） */}
+                {isGroupCreator && !isMe && (
+                  <button
+                    type="button"
+                    onClick={() => setMemberToRemove(m)}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-xl text-[10px] font-bold transition-colors"
+                    title="このメンバーをグループから退出させる"
+                  >
+                    <Trash2 size={12} />
+                    <span>退出させる</span>
+                  </button>
+                )}
+              </div>
             </div>
             
             <div className="flex flex-wrap gap-1 mt-2">
@@ -2285,10 +2326,10 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           <div className="space-y-3 pt-2">
             <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
               <div className="flex items-center gap-1.5">
-                <Eye size={16} className="text-gray-500" />
+                <Eye size={16} className="text-amber-600" />
                 <span className="font-bold text-gray-800 text-sm">閲覧者一覧 ({viewerMembers.length}人)</span>
               </div>
-              <span className="text-[10px] text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full font-bold border border-gray-200">
+              <span className="text-[10px] text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full font-bold border border-amber-200">
                 予定に影響しない閲覧専用
               </span>
             </div>
@@ -2306,90 +2347,110 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
     return (
       <div className="flex flex-col h-full bg-gray-50">
-        <div className="bg-white p-4 border-b flex items-center gap-3 shadow-sm">
-          <button onClick={() => setActiveGroup(null)} className="p-2 -ml-2 bg-gray-50 rounded-full hover:bg-gray-100"><ChevronLeft size={20} className="text-gray-700" /></button>
-          <div className="flex-1 min-w-0">
-            {isEditingGroupName ? (
-              <div className="flex items-center gap-2">
-                <input 
-                  type="text" 
-                  className="border border-indigo-300 px-2 py-1 rounded-lg text-sm font-bold w-full focus:ring-2 focus:ring-indigo-500"
-                  value={editingGroupName}
-                  onChange={e => setEditingGroupName(e.target.value)}
-                  autoFocus
-                />
-                <button onClick={handleUpdateGroupName} className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-bold shrink-0">保存</button>
-                <button onClick={() => setIsEditingGroupName(false)} className="bg-gray-100 text-gray-600 px-2 py-1 rounded-lg text-xs">取消</button>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <h2 className="text-xl font-bold text-gray-900 truncate">{activeGroup.name}</h2>
-                  <button 
-                    onClick={() => { setEditingGroupName(activeGroup.name); setIsEditingGroupName(true); }}
-                    className="p-1 text-gray-400 hover:text-indigo-600 rounded-lg hover:bg-gray-100 shrink-0"
-                    title="グループ名を変更"
-                  >
-                    <Edit2 size={16} />
-                  </button>
+        <div className="bg-white p-4 border-b shadow-sm space-y-3">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setActiveGroup(null)} className="p-2 -ml-2 bg-gray-50 rounded-full hover:bg-gray-100"><ChevronLeft size={20} className="text-gray-700" /></button>
+            <div className="flex-1 min-w-0">
+              {isEditingGroupName ? (
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="text" 
+                    className="border border-indigo-300 px-2 py-1 rounded-lg text-sm font-bold w-full focus:ring-2 focus:ring-indigo-500"
+                    value={editingGroupName}
+                    onChange={e => setEditingGroupName(e.target.value)}
+                    autoFocus
+                  />
+                  <button onClick={handleUpdateGroupName} className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-bold shrink-0">保存</button>
+                  <button onClick={() => setIsEditingGroupName(false)} className="bg-gray-100 text-gray-600 px-2 py-1 rounded-lg text-xs">取消</button>
                 </div>
-
-                {/* 右上アクションボタン：自分の退出 ＆ 作成者のグループ削除 */}
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {user.username !== 'Boss' && (
-                    <button
-                      type="button"
-                      onClick={() => setShowLeaveGroupModal(true)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200 rounded-xl text-[11px] font-bold transition-colors"
-                      title="このグループから退出する"
+              ) : (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <h2 className="text-xl font-bold text-gray-900 truncate">{activeGroup.name}</h2>
+                    <button 
+                      onClick={() => { setEditingGroupName(activeGroup.name); setIsEditingGroupName(true); }}
+                      className="p-1 text-gray-400 hover:text-indigo-600 rounded-lg hover:bg-gray-100 shrink-0"
+                      title="グループ名を変更"
                     >
-                      <LogOut size={12} />
-                      <span>グループ退出</span>
+                      <Edit2 size={16} />
                     </button>
-                  )}
+                  </div>
 
-                  {isGroupCreator && (
-                    <button
-                      type="button"
-                      onClick={() => setShowDeleteGroupModal(true)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-xl text-[11px] font-bold transition-colors"
-                      title="このバンドグループを削除"
-                    >
-                      <Trash2 size={12} />
-                      <span>グループ削除</span>
-                    </button>
-                  )}
+                  {/* 右上アクションボタン：自分の退出 ＆ 作成者のグループ削除 */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {user.username !== 'Boss' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowLeaveGroupModal(true)}
+                        className="flex items-center gap-1 px-2.5 py-1.5 bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200 rounded-xl text-[11px] font-bold transition-colors"
+                        title="このグループから退出する"
+                      >
+                        <LogOut size={12} />
+                        <span>グループ退出</span>
+                      </button>
+                    )}
+
+                    {isGroupCreator && (
+                      <button
+                        type="button"
+                        onClick={() => setShowDeleteGroupModal(true)}
+                        className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-xl text-[11px] font-bold transition-colors"
+                        title="このバンドグループを削除"
+                      >
+                        <Trash2 size={12} />
+                        <span>グループ削除</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-
-            <div className="flex items-center flex-wrap gap-2 mt-1.5">
-              <span className="text-xs text-gray-600 font-medium">
-                メンバー {activePlayingMembers.length}人
-                {viewerMembers.length > 0 && ` ・ 閲覧者 ${viewerMembers.length}人`}
-              </span>
-              <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
-                コード: <strong className="font-mono tracking-widest">{activeGroup.joinCode}</strong>
-              </span>
-
-              {/* 自分の現在の参加モード表示 ＆ 切替ボタン */}
-              {user.username !== 'Boss' && (
-                <button
-                  type="button"
-                  onClick={() => setShowRoleSwitchModal(true)}
-                  className={`text-[10px] px-2 py-0.5 rounded-full font-bold border flex items-center gap-1 transition-colors ${
-                    amIViewer
-                      ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
-                      : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
-                  }`}
-                  title="タップしてメンバー/閲覧者を切り替え"
-                >
-                  <Eye size={11} />
-                  <span>{amIViewer ? '閲覧者モード中 (切替)' : 'メンバー参加中 (切替)'}</span>
-                </button>
               )}
+
+              <div className="flex items-center flex-wrap gap-2 mt-1">
+                <span className="text-xs text-gray-600 font-medium">
+                  メンバー {activePlayingMembers.length}人
+                  {viewerMembers.length > 0 && ` ・ 閲覧者 ${viewerMembers.length}人`}
+                </span>
+                <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                  コード: <strong className="font-mono tracking-widest">{activeGroup.joinCode}</strong>
+                </span>
+              </div>
             </div>
           </div>
+
+          {/* グループに入った後でもいつでも「メンバー ⇄ 閲覧者」を切り替えられる専用バー */}
+          {user.username !== 'Boss' && (
+            <div className="bg-gray-50 p-2 rounded-2xl border border-gray-200 flex items-center justify-between gap-2">
+              <div className="text-[11px] font-bold text-gray-700 pl-1">
+                あなたの参加モード:
+              </div>
+              <div className="flex bg-white p-0.5 rounded-xl border border-gray-200 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => { if (amIViewer) setShowRoleSwitchModal(true); }}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all ${
+                    !amIViewer
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                  }`}
+                >
+                  <Users size={12} />
+                  <span>メンバー (予定反映)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { if (!amIViewer) setShowRoleSwitchModal(true); }}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all ${
+                    amIViewer
+                      ? 'bg-amber-500 text-white shadow-xs'
+                      : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                  }`}
+                >
+                  <Eye size={12} />
+                  <span>閲覧者 (見るだけ)</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex p-2 bg-gray-100 mx-4 mt-4 rounded-xl overflow-x-auto hide-scrollbar gap-1">
@@ -2518,16 +2579,18 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
             <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-in zoom-in-95 duration-150">
               <div className="flex items-center gap-2 text-indigo-600 mb-3">
-                <Eye size={22} className="shrink-0" />
-                <h4 className="font-bold text-base text-gray-900">参加モードの切り替え</h4>
+                {amIViewer ? <Users size={22} className="shrink-0" /> : <Eye size={22} className="shrink-0 text-amber-600" />}
+                <h4 className="font-bold text-base text-gray-900">
+                  {amIViewer ? 'メンバーに戻る確認' : '閲覧者への変更確認'}
+                </h4>
               </div>
               <p className="text-xs text-gray-700 leading-relaxed font-medium mb-2">
-                このグループでのあなたの状態を「<strong>{amIViewer ? '通常メンバー（予定を反映する）' : '閲覧者（予定を反映しない）'}</strong>」に切り替えますか？
+                このグループでの参加モードを「<strong>{amIViewer ? 'メンバー（予定を反映する）' : '閲覧者（見るだけ・予定を反映しない）'}</strong>」に変更しますか？
               </p>
               <p className="text-[11px] text-gray-500 bg-gray-50 p-2.5 rounded-xl mb-5 border border-gray-200">
                 {amIViewer
-                  ? '※通常メンバーになると、あなたのマイ予定がグループの空き日計算に反映されるようになります。'
-                  : '※閲覧者になると、あなたのマイ予定はグループのカレンダーや空き日計算に一切影響しなくなります。'}
+                  ? '※メンバーに戻ると、あなたのマイ予定がグループのカレンダーや空き日計算に再び反映されます。'
+                  : '※閲覧者に変更すると、あなたのマイ予定はグループのカレンダーや空き日計算から除外され、他のメンバーの予定だけを見ることができます（いつでもメンバーに戻れます）。'}
               </p>
               <div className="flex gap-2">
                 <button
@@ -2542,9 +2605,11 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                   type="button"
                   disabled={isSwitchingRole}
                   onClick={handleConfirmSwitchMyRole}
-                  className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                  className={`flex-1 py-2.5 text-white rounded-xl font-bold text-xs shadow-md transition-colors disabled:opacity-50 ${
+                    amIViewer ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-amber-500 hover:bg-amber-600'
+                  }`}
                 >
-                  {isSwitchingRole ? '変更中...' : '切り替える'}
+                  {isSwitchingRole ? '変更中...' : amIViewer ? 'メンバーに戻る' : '閲覧者に変更'}
                 </button>
               </div>
             </div>
@@ -2586,7 +2651,7 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
 
           {/* 参加方法（メンバー or 閲覧者）の選択 */}
           <div>
-            <span className="block text-[11px] font-bold text-gray-700 mb-1.5">参加方法を選択</span>
+            <span className="block text-[11px] font-bold text-gray-700 mb-1.5">参加方法を選択（参加後もいつでも変更できます）</span>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -2652,9 +2717,13 @@ function GroupsView({ user, activeGroup, setActiveGroup }) {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h4 className="font-bold text-gray-900 truncate">{group.name}</h4>
-                        {isViewer && (
+                        {isViewer ? (
                           <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full font-bold flex items-center gap-0.5">
-                            <Eye size={10} /> 閲覧者
+                            <Eye size={10} /> 閲覧者モード
+                          </span>
+                        ) : (
+                          <span className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full font-bold">
+                            メンバー
                           </span>
                         )}
                       </div>
@@ -3440,13 +3509,13 @@ function AdminView() {
                               key={g.id}
                               className={`inline-flex items-center gap-1 border px-2.5 py-1 rounded-lg text-[11px] font-bold ${
                                 isViewer
-                                  ? 'bg-gray-100 text-gray-700 border-gray-300'
+                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
                                   : 'bg-indigo-50 text-indigo-800 border-indigo-200'
                               }`}
                             >
-                              {isViewer ? <Eye size={12} className="shrink-0 text-gray-500" /> : <Users size={12} className="shrink-0 text-indigo-600" />}
+                              {isViewer ? <Eye size={12} className="shrink-0 text-amber-600" /> : <Users size={12} className="shrink-0 text-indigo-600" />}
                               <span>{g.name}</span>
-                              {isViewer && <span className="text-[9px] bg-white px-1 rounded border border-gray-200">閲覧者</span>}
+                              {isViewer && <span className="text-[9px] bg-white px-1 rounded border border-amber-200">閲覧者</span>}
                               <span className="text-[9px] font-mono opacity-75 ml-0.5">({g.joinCode})</span>
                             </span>
                           );
@@ -3557,10 +3626,10 @@ function AdminView() {
                           {viewingMembers.map(m => (
                             <span
                               key={m.id}
-                              className="bg-gray-100 border border-gray-200 text-gray-600 text-[11px] font-bold px-2 py-0.5 rounded-lg inline-flex items-center gap-1"
+                              className="bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-bold px-2 py-0.5 rounded-lg inline-flex items-center gap-1"
                             >
                               <Eye size={10} />
-                              {m.displayName} <span className="text-[9px] font-normal text-gray-400">(@{m.username})</span>
+                              {m.displayName} <span className="text-[9px] font-normal text-amber-600">(@{m.username})</span>
                             </span>
                           ))}
                         </div>
